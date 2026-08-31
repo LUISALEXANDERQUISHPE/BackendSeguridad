@@ -1,10 +1,9 @@
-const jwt = require('jsonwebtoken');
-const config = require('../config');
+const supabase = require('../config/supabase');
 
 /**
  * Middleware para validar el token JWT en rutas protegidas
  */
-module.exports = (req, res, next) => {
+module.exports = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   
   if (!authHeader) {
@@ -20,8 +19,9 @@ module.exports = (req, res, next) => {
   const token = parts[1];
 
   try {
-    const verified = jwt.verify(token, config.jwtSecret);
-    req.user = verified; // Adjuntamos los datos del usuario decodificados al request
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) return res.status(403).json({ error: 'Token inválido o expirado.' });
+    req.user = user;
     next();
   } catch (err) {
     return res.status(403).json({ error: 'Token inválido o expirado.' });
