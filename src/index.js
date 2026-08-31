@@ -13,7 +13,7 @@ const PORT = config.port;
 
 // Middlewares de seguridad y utilidades
 app.use(helmet());
-app.use(cors());
+app.use(cors({ origin: config.corsOrigin }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

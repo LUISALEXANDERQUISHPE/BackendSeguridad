@@ -1,7 +1,9 @@
-// Configuración de base de datos o variables globales
+// Configuración centralizada de la API
 module.exports = {
   port: process.env.PORT || 5000,
   nodeEnv: process.env.NODE_ENV || 'development',
-  jwtSecret: process.env.JWT_SECRET || 'super_secret_key_change_me_in_production'
+  corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  supabaseUrl: process.env.SUPABASE_URL,
+  supabaseSecretKey: process.env.SUPABASE_SECRET_KEY
 };
 
