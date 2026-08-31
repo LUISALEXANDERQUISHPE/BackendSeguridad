@@ -81,12 +81,7 @@ router.post('/login', authController.login);
  *       403:
  *         description: Token inválido o expirado
  */
-router.get('/profile', authMiddleware, (req, res) => {
-  res.json({
-    message: 'Esta es una ruta protegida con JWT',
-    user: req.user
-  });
-});
+router.get('/profile', authMiddleware, authController.profile);
 
 module.exports = router;
 
