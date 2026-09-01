@@ -1,118 +1,313 @@
 const config = require('../config');
 const supabase = require('../config/supabase');
 
-const validateCredentials = (username, email, password) => {
-  if (!username || !password) return 'Usuario y contraseña son requeridos';
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Ingresa un correo electrónico válido';
-  if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username)) return 'El usuario debe tener entre 3 y 32 caracteres válidos';
-  if (password.length < 8) return 'La contraseña debe tener al menos 8 caracteres';
+/**
+ * Valida los datos para el registro.
+ */
+const validateCredentials = (email, password) => {
+  if (!email || !password) {
+    return 'Correo y contraseña son requeridos';
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return 'Ingresa un correo electrónico válido';
+  }
+
+  if (password.length < 8) {
+    return 'La contraseña debe tener al menos 8 caracteres';
+  }
+
   return null;
 };
 
-const validateLogin = (username, email, password) => {
-  if ((!username && !email) || !password) return 'Correo/usuario y contraseña son requeridos';
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Ingresa un correo electrónico válido';
-  if (password.length < 8) return 'La contraseña debe tener al menos 8 caracteres';
+/**
+ * Valida los datos para el login.
+ */
+const validateLogin = (email, password) => {
+  if (!email || !password) {
+    return 'Correo y contraseña son requeridos';
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return 'Ingresa un correo electrónico válido';
+  }
+
+  if (password.length < 8) {
+    return 'La contraseña debe tener al menos 8 caracteres';
+  }
+
   return null;
 };
 
-const buildUsername = (user) => {
-  const metadataUsername = user.user_metadata?.username;
-  const emailUsername = user.email?.split('@')[0];
-  const baseUsername = (metadataUsername || emailUsername || `user_${user.id.slice(0, 8)}`)
-    .toLowerCase().replace(/[^a-z0-9_.-]/g, '_').slice(0, 32);
-  return baseUsername.length >= 3 ? baseUsername : `user_${user.id.slice(0, 8)}`;
-};
-
+/**
+ * Obtiene el perfil de la tabla usuarios.
+ *
+ * La tabla usuarios utiliza:
+ * id
+ * nombre_completo
+ * correo
+ * avatar_url
+ * esta_activo
+ * creado_en
+ * actualizado_en
+ */
 const ensureProfile = async (user) => {
   const { data: existingProfile, error: selectError } = await supabase
-    .from('profiles')
-    .select('id, username, email, full_name, avatar_url, plan, created_at')
-    .eq('id', user.id).maybeSingle();
-  if (selectError) throw selectError;
-  if (existingProfile) return existingProfile;
+    .from('usuarios')
+    .select(`
+      id,
+      nombre_completo,
+      correo,
+      avatar_url,
+      esta_activo,
+      creado_en,
+      actualizado_en
+    `)
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (selectError) {
+    throw selectError;
+  }
+
+  if (existingProfile) {
+    return existingProfile;
+  }
+
+  // Si no existe el perfil, se crea a partir de los datos de Supabase Auth.
+  const fullName =
+    user.user_metadata?.full_name ||
+    user.user_metadata?.name ||
+    '';
 
   const { data: profile, error: insertError } = await supabase
-    .from('profiles')
+    .from('usuarios')
     .insert({
       id: user.id,
-      username: buildUsername(user),
-      email: user.email,
-      full_name: user.user_metadata?.full_name || user.user_metadata?.name || ''
+      nombre_completo: fullName,
+      correo: user.email
     })
-    .select('id, username, email, full_name, avatar_url, plan, created_at').single();
-  if (insertError) throw insertError;
+    .select(`
+      id,
+      nombre_completo,
+      correo,
+      avatar_url,
+      esta_activo,
+      creado_en,
+      actualizado_en
+    `)
+    .single();
+
+  if (insertError) {
+    throw insertError;
+  }
+
   return profile;
 };
 
+/**
+ * REGISTRO
+ */
 exports.register = async (req, res, next) => {
   try {
-    const { username, email, password, fullName } = req.body;
-    const validationError = validateCredentials(username, email, password);
-    if (validationError) return res.status(400).json({ error: validationError });
-
-    const normalizedUsername = username.toLowerCase();
-    const { data: existingProfile, error: profileError } = await supabase
-      .from('profiles').select('id').or(`username.eq.${normalizedUsername},email.eq.${email.toLowerCase()}`).maybeSingle();
-    if (profileError) throw profileError;
-    if (existingProfile) return res.status(409).json({ error: 'El usuario ya existe' });
-
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-      email: email.toLowerCase(),
+    const {
+      email,
       password,
-      email_confirm: true,
-      user_metadata: { username: normalizedUsername, full_name: fullName || normalizedUsername }
-    });
+      fullName
+    } = req.body;
+
+    const validationError = validateCredentials(
+      email,
+      password
+    );
+
+    if (validationError) {
+      return res.status(400).json({
+        error: validationError
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Verificar si ya existe un perfil con ese correo.
+    const { data: existingProfile, error: profileError } = await supabase
+      .from('usuarios')
+      .select('id')
+      .eq('correo', normalizedEmail)
+      .maybeSingle();
+
+    if (profileError) {
+      throw profileError;
+    }
+
+    if (existingProfile) {
+      return res.status(409).json({
+        error: 'El usuario ya existe'
+      });
+    }
+
+    // Crear usuario en Supabase Auth.
+    const { data: authData, error: authError } =
+      await supabase.auth.admin.createUser({
+        email: normalizedEmail,
+        password,
+        email_confirm: true,
+        user_metadata: {
+          full_name: fullName || ''
+        }
+      });
+
     if (authError) {
-      if (authError.code === 'email_exists') return res.status(409).json({ error: 'El usuario ya existe' });
+      if (
+        authError.code === 'email_exists' ||
+        authError.message?.toLowerCase().includes('already registered')
+      ) {
+        return res.status(409).json({
+          error: 'El usuario ya existe'
+        });
+      }
+
       throw authError;
     }
 
+    // Crear el perfil correspondiente en usuarios.
     const { data: profile, error: insertError } = await supabase
-      .from('profiles')
-      .upsert({ id: authData.user.id, username: normalizedUsername, email: email.toLowerCase(), full_name: fullName || normalizedUsername }, { onConflict: 'id' })
-      .select('id, username, email, full_name, avatar_url, plan, created_at').single();
+      .from('usuarios')
+      .insert({
+        id: authData.user.id,
+        nombre_completo: fullName || '',
+        correo: normalizedEmail
+      })
+      .select(`
+        id,
+        nombre_completo,
+        correo,
+        avatar_url,
+        esta_activo,
+        creado_en,
+        actualizado_en
+      `)
+      .single();
+
     if (insertError) {
+      // Si falla la creación del perfil, eliminar el usuario de Auth
+      // para evitar dejar un usuario huérfano.
       await supabase.auth.admin.deleteUser(authData.user.id);
+
       throw insertError;
     }
-    res.status(201).json({ message: 'Usuario registrado exitosamente', user: profile });
+
+    return res.status(201).json({
+      message: 'Usuario registrado exitosamente',
+      user: profile
+    });
+
   } catch (error) {
     next(error);
   }
 };
 
+/**
+ * LOGIN
+ */
 exports.login = async (req, res, next) => {
   try {
-    const { username, email, password } = req.body;
-    const validationError = validateLogin(username, email, password);
-    if (validationError) return res.status(400).json({ error: validationError });
+    const {
+      email,
+      password
+    } = req.body;
 
-    const normalizedUsername = username ? username.toLowerCase() : null;
-    let loginEmail = email?.toLowerCase();
-    if (normalizedUsername) {
-      const { data: usernameProfile, error: usernameError } = await supabase
-        .from('profiles').select('email').eq('username', normalizedUsername).maybeSingle();
-      if (usernameError) throw usernameError;
-      if (!usernameProfile) return res.status(401).json({ error: 'Credenciales inválidas' });
-      loginEmail = usernameProfile.email;
+    const validationError = validateLogin(
+      email,
+      password
+    );
+
+    if (validationError) {
+      return res.status(400).json({
+        error: validationError
+      });
     }
 
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email: loginEmail, password
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Primero verificamos que exista el perfil.
+    const { data: profile, error: profileError } = await supabase
+      .from('usuarios')
+      .select(`
+        id,
+        nombre_completo,
+        correo,
+        avatar_url,
+        esta_activo,
+        creado_en,
+        actualizado_en
+      `)
+      .eq('correo', normalizedEmail)
+      .maybeSingle();
+
+    if (profileError) {
+      throw profileError;
+    }
+
+    if (!profile) {
+      return res.status(401).json({
+        error: 'Credenciales inválidas'
+      });
+    }
+
+    // Verificar si la cuenta está activa.
+    if (!profile.esta_activo) {
+      return res.status(403).json({
+        error: 'La cuenta se encuentra desactivada'
+      });
+    }
+
+    // Autenticar contra Supabase Auth.
+    const { data: authData, error: authError } =
+      await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password
+      });
+
+    if (authError) {
+      return res.status(401).json({
+        error: 'Credenciales inválidas'
+      });
+    }
+
+    // Garantizar que exista el perfil.
+    const finalProfile = await ensureProfile(authData.user);
+
+    return res.json({
+      message: 'Autenticación exitosa',
+      token: authData.session.access_token,
+      user: finalProfile
     });
-    if (authError) return res.status(401).json({ error: 'Credenciales inválidas' });
-    const profile = await ensureProfile(authData.user);
-    res.json({ message: 'Autenticación exitosa', token: authData.session.access_token, user: profile });
+
   } catch (error) {
     next(error);
   }
 };
 
+/**
+ * OBTENER PERFIL
+ */
 exports.profile = async (req, res, next) => {
   try {
     const profile = await ensureProfile(req.user);
-    res.json({ message: 'Perfil obtenido correctamente', user: profile });
+
+    // Verificar que la cuenta siga activa.
+    if (!profile.esta_activo) {
+      return res.status(403).json({
+        error: 'La cuenta se encuentra desactivada'
+      });
+    }
+
+    return res.json({
+      message: 'Perfil obtenido correctamente',
+      user: profile
+    });
+
   } catch (error) {
     next(error);
   }
