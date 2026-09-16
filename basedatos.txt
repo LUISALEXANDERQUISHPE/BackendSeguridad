@@ -1,0 +1,715 @@
+-- ============================================================
+
+-- SCRIPT SQL — Sistema colaborativo de edición LaTeX
+
+-- Adaptado para Supabase (PostgreSQL)
+
+-- Generado a partir del esquema DBML final (sin modificaciones)
+
+-- ============================================================
+
+-- Cómo ejecutarlo:
+
+-- 1. Entra a tu proyecto en https://supabase.com/dashboard 
+
+-- 2. Ve a "SQL Editor" -> "New query"
+
+-- 3. Pega todo este archivo y dale "Run"
+
+-- ============================================================
+
+-- Extensión necesaria para generar UUIDs con gen_random_uuid()
+
+create extension if not exists pgcrypto;
+
+-- ============================================================
+
+-- ENUMERACIONES
+
+-- ============================================================
+
+create type rol_proyecto as enum (
+
+'propietario',
+
+'editor',
+
+'revisor',
+
+'invitado'
+
+);
+
+create type nivel_permiso_archivo as enum (
+
+'lectura',
+
+'comentario',
+
+'edicion'
+
+);
+
+create type estado_invitacion as enum (
+
+'pendiente',
+
+'aceptada',
+
+'revocada',
+
+'expirada'
+
+);
+
+create type estado_compilacion as enum (
+
+'exitosa',
+
+'error',
+
+'en_proceso'
+
+);
+
+create type tipo_archivo as enum (
+
+'tex',
+
+'bib',
+
+'imagen',
+
+'otro'
+
+);
+
+create type tipo_nodo as enum (
+
+'archivo',
+
+'carpeta'
+
+);
+
+-- ============================================================
+
+-- ÉPICA: USUARIOS Y SEGURIDAD (HU-01, HU-02, HU-03)
+
+-- ============================================================
+
+create table usuarios (
+
+id uuid primary key references auth.users(id) on delete cascade,
+
+nombre_completo varchar,
+
+correo varchar unique not null,
+
+avatar_url varchar,
+
+esta_activo boolean default true,
+
+creado_en timestamptz default now(),
+
+actualizado_en timestamptz
+
+);
+
+comment on table usuarios is 'HU-01: Perfil público del usuario. La contraseña y verificación de correo las maneja auth.users de Supabase, no esta tabla.';
+
+comment on column usuarios.id is 'Debe coincidir con el id de auth.users (Supabase Auth). Se crea vía trigger al registrarse, no manualmente.';
+
+comment on column usuarios.nombre_completo is 'Nombre visible del usuario dentro de la plataforma (para mostrar en colaboración, comentarios, etc.)';
+
+comment on column usuarios.correo is 'Copia de referencia del correo (el correo real y su verificación los gestiona auth.users). Útil para mostrarlo sin consultar el esquema auth.';
+
+comment on column usuarios.avatar_url is 'URL de la foto de perfil, normalmente almacenada en Supabase Storage';
+
+comment on column usuarios.esta_activo is 'Permite desactivar una cuenta sin borrarla (soft-disable), por ejemplo ante abuso o baja voluntaria';
+
+comment on column usuarios.creado_en is 'Fecha de creación del perfil, igual a la fecha de registro';
+
+comment on column usuarios.actualizado_en is 'Última vez que el usuario editó su perfil (nombre, avatar, etc.)';
+
+alter table usuarios enable row level security;
+
+create policy "usuarios_select_own_profile"
+
+on usuarios for select
+
+using (auth.uid() = id);
+
+create policy "usuarios_insert_own_profile"
+
+on usuarios for insert
+
+with check (auth.uid() = id);
+
+create policy "usuarios_update_own_profile"
+
+on usuarios for update
+
+using (auth.uid() = id)
+
+with check (auth.uid() = id);
+
+create table roles_sistema (
+
+id uuid primary key default gen_random_uuid(),
+
+usuario_id uuid not null references usuarios(id),
+
+es_administrador boolean default false,
+
+unique (usuario_id)
+
+);
+
+comment on table roles_sistema is 'HU-03: Rol de administrador a nivel de sistema (distinto del rol dentro de un proyecto, que vive en miembros_proyecto)';
+
+comment on column roles_sistema.id is 'Identificador único de la asignación de rol de sistema';
+
+comment on column roles_sistema.usuario_id is 'Usuario al que se le asigna el rol';
+
+comment on column roles_sistema.es_administrador is 'true si el usuario es administrador general de toda la plataforma (no de un proyecto puntual)';
+
+-- ============================================================
+
+-- ÉPICA: EXTRAS (HU-16) — se crea antes de proyectos por la FK
+
+-- ============================================================
+
+create table plantillas (
+
+id uuid primary key default gen_random_uuid(),
+
+nombre varchar not null,
+
+categoria varchar,
+
+descripcion text,
+
+storage_path varchar,
+
+creado_en timestamptz default now()
+
+);
+
+comment on table plantillas is 'HU-16: Plantillas predefinidas que el usuario puede elegir al crear un proyecto nuevo (artículo, tesis, presentación)';
+
+comment on column plantillas.id is 'Identificador único de la plantilla';
+
+comment on column plantillas.nombre is 'Nombre visible de la plantilla, ej. "Tesis de grado" o "Artículo IEEE"';
+
+comment on column plantillas.categoria is 'Categoría de la plantilla, ej. "articulo", "tesis", "presentacion"';
+
+comment on column plantillas.descripcion is 'Descripción breve de para qué sirve o cómo está estructurada la plantilla';
+
+comment on column plantillas.storage_path is 'Ruta en Supabase Storage donde están los archivos base (.tex, estructura de carpetas) que se copian al crear un proyecto nuevo';
+
+comment on column plantillas.creado_en is 'Fecha en que se agregó la plantilla al catálogo';
+
+-- ============================================================
+
+-- ÉPICA: PROYECTOS Y ARCHIVOS (HU-04, HU-05)
+
+-- ============================================================
+
+create table proyectos (
+
+id uuid primary key default gen_random_uuid(),
+
+propietario_id uuid not null references usuarios(id),
+
+nombre varchar not null,
+
+descripcion text,
+
+esta_archivado boolean default false,
+
+plantilla_id uuid references plantillas(id),
+
+creado_en timestamptz default now(),
+
+actualizado_en timestamptz
+
+);
+
+comment on table proyectos is 'HU-04: Crear, renombrar, archivar y eliminar proyectos';
+
+comment on column proyectos.id is 'Identificador único del proyecto';
+
+comment on column proyectos.propietario_id is 'Usuario que creó el proyecto y tiene control total sobre él';
+
+comment on column proyectos.nombre is 'Nombre visible del proyecto, ej. "Tesis de grado"';
+
+comment on column proyectos.descripcion is 'Descripción opcional del contenido o propósito del proyecto';
+
+comment on column proyectos.esta_archivado is 'true si el usuario lo archivó (se oculta del listado principal pero no se borra)';
+
+comment on column proyectos.plantilla_id is 'Plantilla base usada al crear el proyecto (artículo, tesis, presentación), si aplica';
+
+comment on column proyectos.creado_en is 'Fecha de creación del proyecto';
+
+comment on column proyectos.actualizado_en is 'Última vez que se modificó algún dato del proyecto (nombre, descripción, etc.)';
+
+create table nodos (
+
+id uuid primary key default gen_random_uuid(),
+
+proyecto_id uuid not null references proyectos(id),
+
+padre_id uuid references nodos(id),
+
+nombre varchar not null,
+
+tipo_nodo tipo_nodo not null,
+
+tipo_archivo tipo_archivo,
+
+contenido_actual text,
+
+storage_path varchar,
+
+tamano_bytes integer,
+
+creado_por uuid references usuarios(id),
+
+creado_en timestamptz default now(),
+
+actualizado_en timestamptz
+
+);
+
+comment on table nodos is 'HU-05: Carpetas anidadas y archivos .tex/.bib/imágenes dentro de un proyecto. contenido_actual guarda el texto plano/LaTeX (cifrado); storage_path apunta a Supabase Storage para binarios.';
+
+comment on column nodos.id is 'Identificador único del nodo (archivo o carpeta)';
+
+comment on column nodos.proyecto_id is 'Proyecto al que pertenece este archivo o carpeta';
+
+comment on column nodos.padre_id is 'Carpeta contenedora. NULL si está en la raíz del proyecto. Permite anidar carpetas indefinidamente.';
+
+comment on column nodos.nombre is 'Nombre del archivo o carpeta, ej. "main.tex" o "imagenes"';
+
+comment on column nodos.tipo_nodo is 'Indica si este registro es un archivo o una carpeta';
+
+comment on column nodos.tipo_archivo is 'Si es un archivo, qué tipo es (.tex, .bib, imagen, otro). NULL si es carpeta.';
+
+comment on column nodos.contenido_actual is 'Texto vigente del archivo (código LaTeX), guardado ya cifrado. Aplica solo a archivos de texto como .tex/.bib.';
+
+comment on column nodos.storage_path is 'Ruta del archivo dentro de Supabase Storage, usada para binarios como imágenes o PDFs generados';
+
+comment on column nodos.tamano_bytes is 'Tamaño del archivo en bytes, útil para mostrar en el explorador y controlar cuotas de almacenamiento';
+
+comment on column nodos.creado_por is 'Usuario que creó este archivo o carpeta';
+
+comment on column nodos.creado_en is 'Fecha de creación del nodo';
+
+comment on column nodos.actualizado_en is 'Última vez que se modificó el contenido o los datos del nodo';
+
+-- ============================================================
+
+-- ÉPICA: EDITOR Y COMPILACIÓN (HU-06 a HU-11)
+
+-- ============================================================
+
+create table versiones_archivo (
+
+id uuid primary key default gen_random_uuid(),
+
+archivo_id uuid not null references nodos(id),
+
+numero_version integer not null,
+
+contenido_snapshot text,
+
+modificado_por uuid references usuarios(id),
+
+resumen_cambio varchar,
+
+creado_en timestamptz default now()
+
+);
+
+comment on table versiones_archivo is 'HU-11: Historial de versiones. Cada fila es un snapshot inmutable; nunca se sobreescribe, solo se agregan filas nuevas (incluso al "restaurar" una versión anterior).';
+
+comment on column versiones_archivo.id is 'Identificador único de esta versión guardada';
+
+comment on column versiones_archivo.archivo_id is 'Archivo al que pertenece esta versión del historial';
+
+comment on column versiones_archivo.numero_version is 'Número secuencial de versión dentro de ese archivo (1, 2, 3...)';
+
+comment on column versiones_archivo.contenido_snapshot is 'Copia completa (cifrada) del contenido del archivo en el momento en que se guardó esta versión';
+
+comment on column versiones_archivo.modificado_por is 'Usuario que realizó los cambios que generaron esta versión';
+
+comment on column versiones_archivo.resumen_cambio is 'Descripción breve del cambio, ej. "Agregada sección de idioma" (opcional, puede ser autogenerado)';
+
+comment on column versiones_archivo.creado_en is 'Fecha y hora exacta en que se guardó esta versión, usada para ordenar el historial';
+
+create table estados_autoguardado (
+
+id uuid primary key default gen_random_uuid(),
+
+archivo_id uuid not null references nodos(id),
+
+usuario_id uuid not null references usuarios(id),
+
+buffer_contenido text,
+
+guardado_en timestamptz default now(),
+
+esta_sincronizado boolean default true
+
+);
+
+comment on table estados_autoguardado is 'HU-09: Guardado automático mientras se edita / HU-10: Sincronización entre dispositivos del mismo usuario';
+
+comment on column estados_autoguardado.id is 'Identificador único del registro de autoguardado';
+
+comment on column estados_autoguardado.archivo_id is 'Archivo que se está autoguardando';
+
+comment on column estados_autoguardado.usuario_id is 'Usuario que está editando (permite rastrear cambios por dispositivo/sesión)';
+
+comment on column estados_autoguardado.buffer_contenido is 'Contenido temporal guardado automáticamente mientras el usuario escribe, aún no confirmado como versión oficial';
+
+comment on column estados_autoguardado.guardado_en is 'Momento exacto del último autoguardado, usado para el indicador "Guardando.../Guardado"';
+
+comment on column estados_autoguardado.esta_sincronizado is 'false si este dispositivo tiene cambios que no se han propagado a otros dispositivos del usuario';
+
+create table compilaciones (
+
+id uuid primary key default gen_random_uuid(),
+
+proyecto_id uuid not null references proyectos(id),
+
+archivo_principal_id uuid not null references nodos(id),
+
+estado estado_compilacion not null,
+
+log_salida text,
+
+pdf_output_path varchar,
+
+referencia_synctex varchar,
+
+solicitado_por uuid references usuarios(id),
+
+iniciado_en timestamptz default now(),
+
+finalizado_en timestamptz
+
+);
+
+comment on table compilaciones is 'HU-07: Compilación a PDF con motor seleccionable / HU-08: Sincronización PDF-código vía SyncTeX';
+
+comment on column compilaciones.id is 'Identificador único de esta compilación';
+
+comment on column compilaciones.proyecto_id is 'Proyecto al que pertenece esta compilación';
+
+comment on column compilaciones.archivo_principal_id is 'Archivo .tex raíz que se compiló (normalmente main.tex)';
+
+comment on column compilaciones.estado is 'Resultado de la compilación: exitosa, error, o en_proceso mientras corre';
+
+comment on column compilaciones.log_salida is 'Registro completo de la compilación (errores y advertencias), mostrado al usuario en el panel de log';
+
+comment on column compilaciones.pdf_output_path is 'Ruta del PDF generado dentro de Supabase Storage, usada para mostrarlo en el visor';
+
+comment on column compilaciones.referencia_synctex is 'Referencia al archivo .synctex generado, usado para sincronizar clics entre el PDF y el código fuente';
+
+comment on column compilaciones.solicitado_por is 'Usuario que presionó el botón de compilar';
+
+comment on column compilaciones.iniciado_en is 'Momento en que empezó la compilación';
+
+comment on column compilaciones.finalizado_en is 'Momento en que terminó la compilación (exitosa o con error)';
+
+-- ============================================================
+
+-- ÉPICA: COLABORACIÓN Y SEGURIDAD (HU-12 a HU-15, HU-17, HU-18)
+
+-- ============================================================
+
+create table miembros_proyecto (
+
+id uuid primary key default gen_random_uuid(),
+
+proyecto_id uuid not null references proyectos(id),
+
+usuario_id uuid not null references usuarios(id),
+
+rol rol_proyecto not null default 'invitado',
+
+invitado_por uuid references usuarios(id),
+
+se_unio_en timestamptz default now(),
+
+unique (proyecto_id, usuario_id)
+
+);
+
+comment on table miembros_proyecto is 'HU-03/HU-13: Roles por proyecto (propietario, editor, revisor, invitado). Esta tabla es la base para las reglas de Row Level Security en Supabase.';
+
+comment on column miembros_proyecto.id is 'Identificador único de la membresía';
+
+comment on column miembros_proyecto.proyecto_id is 'Proyecto al que pertenece este colaborador';
+
+comment on column miembros_proyecto.usuario_id is 'Usuario que es miembro del proyecto';
+
+comment on column miembros_proyecto.rol is 'Nivel de acceso del usuario dentro de este proyecto específico';
+
+comment on column miembros_proyecto.invitado_por is 'Usuario que lo invitó al proyecto (para trazabilidad)';
+
+comment on column miembros_proyecto.se_unio_en is 'Fecha en que este usuario pasó a formar parte del proyecto';
+
+create table invitaciones (
+
+id uuid primary key default gen_random_uuid(),
+
+proyecto_id uuid not null references proyectos(id),
+
+correo varchar,
+
+rol rol_proyecto not null,
+
+token varchar unique not null,
+
+estado estado_invitacion default 'pendiente',
+
+creado_por uuid not null references usuarios(id),
+
+expira_en timestamptz,
+
+creado_en timestamptz default now()
+
+);
+
+comment on table invitaciones is 'HU-13: Invitar colaboradores por correo o enlace, y revocar accesos';
+
+comment on column invitaciones.id is 'Identificador único de la invitación';
+
+comment on column invitaciones.proyecto_id is 'Proyecto al que se invita';
+
+comment on column invitaciones.correo is 'Correo del invitado, usado si la invitación es por email en vez de link';
+
+comment on column invitaciones.rol is 'Rol que tendrá el usuario si acepta la invitación';
+
+comment on column invitaciones.token is 'Código único usado en el link de invitación, para validar y aceptar el acceso';
+
+comment on column invitaciones.estado is 'Estado actual de la invitación: pendiente, aceptada, revocada o expirada';
+
+comment on column invitaciones.creado_por is 'Usuario (normalmente el propietario) que generó la invitación';
+
+comment on column invitaciones.expira_en is 'Fecha límite hasta la cual el link/invitación es válido';
+
+comment on column invitaciones.creado_en is 'Fecha en que se generó la invitación';
+
+create table permisos_archivo (
+
+id uuid primary key default gen_random_uuid(),
+
+nodo_id uuid not null references nodos(id),
+
+usuario_id uuid references usuarios(id),
+
+rol rol_proyecto,
+
+nivel_permiso nivel_permiso_archivo not null,
+
+otorgado_por uuid references usuarios(id),
+
+actualizado_en timestamptz default now()
+
+);
+
+comment on table permisos_archivo is 'HU-14: Restringir permisos de lectura/comentario/edición en archivos específicos, ya sea a un usuario o a todo un rol';
+
+comment on column permisos_archivo.id is 'Identificador único de la regla de permiso';
+
+comment on column permisos_archivo.nodo_id is 'Archivo sobre el que aplica este permiso';
+
+comment on column permisos_archivo.usuario_id is 'Usuario específico al que aplica el permiso (opcional, si es individual)';
+
+comment on column permisos_archivo.rol is 'Rol al que aplica el permiso en vez de un usuario puntual (opcional, si es por grupo de rol)';
+
+comment on column permisos_archivo.nivel_permiso is 'Nivel de acceso otorgado: lectura, comentario o edición';
+
+comment on column permisos_archivo.otorgado_por is 'Usuario que configuró este permiso (normalmente el propietario del proyecto)';
+
+comment on column permisos_archivo.actualizado_en is 'Última vez que se modificó este permiso, útil para auditoría';
+
+create table sesiones_edicion (
+
+id uuid primary key default gen_random_uuid(),
+
+archivo_id uuid not null references nodos(id),
+
+usuario_id uuid not null references usuarios(id),
+
+posicion_cursor integer,
+
+seleccion_inicio integer,
+
+seleccion_fin integer,
+
+ultimo_ping timestamptz default now()
+
+);
+
+comment on table sesiones_edicion is 'HU-12: Edición en tiempo real (cursores y selecciones de otros colaboradores). En producción normalmente se maneja con Supabase Realtime/Presence en vez de guardar cada ping en la tabla, pero se modela así para completar el diagrama.';
+
+comment on column sesiones_edicion.id is 'Identificador único de la sesión de edición activa';
+
+comment on column sesiones_edicion.archivo_id is 'Archivo que el usuario tiene abierto y está editando';
+
+comment on column sesiones_edicion.usuario_id is 'Usuario conectado actualmente a este archivo';
+
+comment on column sesiones_edicion.posicion_cursor is 'Posición del cursor de texto de este usuario, para mostrarlo a los demás colaboradores';
+
+comment on column sesiones_edicion.seleccion_inicio is 'Índice donde comienza el texto seleccionado por este usuario, si hay selección';
+
+comment on column sesiones_edicion.seleccion_fin is 'Índice donde termina el texto seleccionado por este usuario, si hay selección';
+
+comment on column sesiones_edicion.ultimo_ping is 'Última señal de actividad del usuario, usada para saber si sigue conectado o se debe remover su cursor';
+
+create table comentarios (
+
+id uuid primary key default gen_random_uuid(),
+
+archivo_id uuid not null references nodos(id),
+
+usuario_id uuid not null references usuarios(id),
+
+comentario_padre_id uuid references comentarios(id),
+
+seleccion_inicio integer,
+
+seleccion_fin integer,
+
+contenido text not null,
+
+esta_resuelto boolean default false,
+
+creado_en timestamptz default now()
+
+);
+
+comment on table comentarios is 'HU-15: Comentarios en hilos sobre fragmentos específicos del documento';
+
+comment on column comentarios.id is 'Identificador único del comentario';
+
+comment on column comentarios.archivo_id is 'Archivo sobre el cual se dejó el comentario';
+
+comment on column comentarios.usuario_id is 'Usuario que escribió el comentario';
+
+comment on column comentarios.comentario_padre_id is 'Comentario al que responde este (NULL si es un comentario raíz, no una respuesta)';
+
+comment on column comentarios.seleccion_inicio is 'Índice donde comienza el fragmento de texto comentado';
+
+comment on column comentarios.seleccion_fin is 'Índice donde termina el fragmento de texto comentado';
+
+comment on column comentarios.contenido is 'Texto del comentario escrito por el usuario';
+
+comment on column comentarios.esta_resuelto is 'true si el hilo de comentarios fue marcado como resuelto';
+
+comment on column comentarios.creado_en is 'Fecha y hora en que se publicó el comentario';
+
+create table registros_auditoria (
+
+id uuid primary key default gen_random_uuid(),
+
+usuario_id uuid references usuarios(id),
+
+proyecto_id uuid references proyectos(id),
+
+accion varchar not null,
+
+tipo_entidad varchar,
+
+entidad_id uuid,
+
+direccion_ip varchar,
+
+metadatos jsonb,
+
+creado_en timestamptz default now()
+
+);
+
+comment on table registros_auditoria is 'HU-18: Registro de auditoría de acciones del sistema (login, cambios de permisos, etc.). metadatos usa jsonb, tipo nativo de PostgreSQL/Supabase para guardar datos flexibles.';
+
+comment on column registros_auditoria.id is 'Identificador único del evento registrado';
+
+comment on column registros_auditoria.usuario_id is 'Usuario que realizó la acción (NULL si fue una acción automática del sistema)';
+
+comment on column registros_auditoria.proyecto_id is 'Proyecto relacionado con la acción, si aplica';
+
+comment on column registros_auditoria.accion is 'Descripción corta de la acción realizada, ej. "login", "cambio_rol", "eliminar_archivo"';
+
+comment on column registros_auditoria.tipo_entidad is 'Tipo de objeto afectado, ej. "proyecto", "archivo", "usuario"';
+
+comment on column registros_auditoria.entidad_id is 'ID del objeto afectado por la acción, para poder rastrear el registro exacto';
+
+comment on column registros_auditoria.direccion_ip is 'Dirección IP desde la que se realizó la acción, útil para detectar accesos sospechosos';
+
+comment on column registros_auditoria.metadatos is 'Datos adicionales de contexto en formato JSON (ej. valores antes/después de un cambio)';
+
+comment on column registros_auditoria.creado_en is 'Fecha y hora exacta del evento registrado';
+
+-- ============================================================
+
+-- ÍNDICES RECOMENDADOS SOBRE LLAVES FORÁNEAS
+
+-- (Postgres no los crea automáticamente; mejoran el rendimiento
+
+-- de joins y de las políticas de Row Level Security)
+
+-- ============================================================
+
+create index idx_roles_sistema_usuario_id on roles_sistema(usuario_id);
+
+create index idx_proyectos_propietario_id on proyectos(propietario_id);
+
+create index idx_proyectos_plantilla_id on proyectos(plantilla_id);
+
+create index idx_nodos_proyecto_id on nodos(proyecto_id);
+
+create index idx_nodos_padre_id on nodos(padre_id);
+
+create index idx_nodos_creado_por on nodos(creado_por);
+
+create index idx_versiones_archivo_archivo_id on versiones_archivo(archivo_id);
+
+create index idx_versiones_archivo_modificado_por on versiones_archivo(modificado_por);
+
+create index idx_estados_autoguardado_archivo_id on estados_autoguardado(archivo_id);
+
+create index idx_estados_autoguardado_usuario_id on estados_autoguardado(usuario_id);
+
+create index idx_compilaciones_proyecto_id on compilaciones(proyecto_id);
+
+create index idx_compilaciones_archivo_principal_id on compilaciones(archivo_principal_id);
+
+create index idx_miembros_proyecto_proyecto_id on miembros_proyecto(proyecto_id);
+
+create index idx_miembros_proyecto_usuario_id on miembros_proyecto(usuario_id);
+
+create index idx_invitaciones_proyecto_id on invitaciones(proyecto_id);
+
+create index idx_permisos_archivo_nodo_id on permisos_archivo(nodo_id);
+
+create index idx_permisos_archivo_usuario_id on permisos_archivo(usuario_id);
+
+create index idx_sesiones_edicion_archivo_id on sesiones_edicion(archivo_id);
+
+create index idx_sesiones_edicion_usuario_id on sesiones_edicion(usuario_id);
+
+create index idx_comentarios_archivo_id on comentarios(archivo_id);
+
+create index idx_comentarios_usuario_id on comentarios(usuario_id);
+
+create index idx_comentarios_padre_id on comentarios(comentario_padre_id);
+
+create index idx_registros_auditoria_usuario_id on registros_auditoria(usuario_id);
+
+create index idx_registros_auditoria_proyecto_id on registros_auditoria(proyecto_id);
