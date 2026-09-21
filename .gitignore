@@ -25,3 +25,10 @@ lerna-debug.log*
 *.sln
 *.sw?
 
+# LaTeX storage and build artifacts
+storage/
+*.aux
+*.log
+*.out
+*.synctex.gz
+

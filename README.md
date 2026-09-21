@@ -42,10 +42,23 @@ npm start
 ```
 
 El servidor estará corriendo en: [http://localhost:5000](http://localhost:5000)
+Documentación interactiva Swagger: [http://localhost:5000/api-docs](http://localhost:5000/api-docs)
 
-La autenticación usa `/api/auth/register`, `/api/auth/login` y `/api/auth/profile`. El registro acepta el correo real del usuario, incluyendo Gmail; Supabase Auth administra la contraseña y el backend guarda el perfil en `profiles`. Ejecuta `supabase/001_profiles.sql` desde el SQL Editor de Supabase antes de iniciar el backend.
+### Autenticación
+La autenticación usa `/api/auth/register`, `/api/auth/login` y `/api/auth/profile`. El registro acepta el correo real del usuario; Supabase Auth administra la contraseña y el backend guarda el perfil en `usuarios`.
 
-Para usar Gmail con contraseña, no necesitas activar un proveedor externo: envía `email: "persona@gmail.com"` al registro/login. Para el botón OAuth de Google, activa Google en Supabase Authentication > Providers y configura las URLs de redirección; ese flujo se incorporará después en el frontend.
+### Endpoints del Editor LaTeX (`/api/documents`)
+Todas las rutas de documentos requieren el encabezado `Authorization: Bearer <token>`:
+
+- **`POST /api/documents`**: Crear nuevo documento/proyecto LaTeX.
+- **`GET /api/documents`**: Listar todos los documentos accesibles del usuario.
+- **`GET /api/documents/:id`**: Obtener detalles, contenido LaTeX y estado de compilación.
+- **`PUT /api/documents/:id`**: Guardar código LaTeX (guardado manual con snapshot o autoguardado Ctrl+S con `isAutoSave: true`).
+- **`DELETE /api/documents/:id`**: Eliminar documento.
+- **`POST /api/documents/:id/compile`**: Compilar el código a PDF en un entorno aislado con `pdflatex`. Extrae errores con número de línea y advertencias.
+- **`GET /api/documents/:id/pdf`**: Visualizar el PDF generado (inline) o descargar (`?download=true`).
+- **`GET /api/documents/:id/source`**: Descargar el código fuente `.tex` original (`?download=true`).
 
 Los puntos reservados para cifrado están en `src/utils/crypto.js`: `encrypt(data)` debe invocarse antes de guardar un campo sensible de aplicación y `decrypt(data)` después de leerlo. No cifres contraseñas: Supabase Auth las almacena y verifica de forma segura.
+
 

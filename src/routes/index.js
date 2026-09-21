@@ -1,9 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const authRoutes = require('./authRoutes');
+const documentRoutes = require('./documentRoutes');
 
 // Rutas de autenticación
 router.use('/auth', authRoutes);
+
+// Rutas de documentos LaTeX
+router.use('/documents', documentRoutes);
 
 /**
  * @swagger
