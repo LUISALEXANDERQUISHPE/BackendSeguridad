@@ -5,6 +5,7 @@ module.exports = {
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   supabaseUrl: process.env.SUPABASE_URL,
   supabaseSecretKey: process.env.SUPABASE_SECRET_KEY,
+  storageBucket: process.env.SUPABASE_STORAGE_BUCKET || 'DocumentosSecureLeaf',
   latexEngine: process.env.LATEX_ENGINE || 'pdflatex',
   latexTimeoutMs: parseInt(process.env.LATEX_TIMEOUT_MS, 10) || 30000,
   storagePath: process.env.STORAGE_PATH || require('path').join(__dirname, '../../storage')
