@@ -2,12 +2,16 @@ const express = require('express');
 const router = express.Router();
 const authRoutes = require('./authRoutes');
 const documentRoutes = require('./documentRoutes');
+const projectRoutes = require('./projectRoutes');
 
 // Rutas de autenticación
 router.use('/auth', authRoutes);
 
 // Rutas de documentos LaTeX
 router.use('/documents', documentRoutes);
+
+// Rutas de gestión de proyectos
+router.use('/projects', projectRoutes);
 
 /**
  * @swagger
