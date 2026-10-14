@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const supabase = require('../config/supabase');
 const latexService = require('../services/latexService');
+const storageService = require('../services/storageService');
 
 // Plantilla inicial por defecto para nuevos documentos LaTeX
 const DEFAULT_LATEX_TEMPLATE = `\\documentclass{article}
@@ -185,6 +186,9 @@ exports.createDocument = async (req, res, next) => {
         modificado_por: userId,
         resumen_cambio: 'Creación inicial del documento'
       });
+
+    // 5. Guardar el archivo .tex en Supabase Storage
+    await storageService.syncNodeSource(node, initialContent);
 
     return res.status(201).json({
       message: 'Documento creado exitosamente',
@@ -422,6 +426,11 @@ exports.updateDocument = async (req, res, next) => {
 
     if (updateError) throw updateError;
 
+    // Mantener sincronizada la copia del archivo en Supabase Storage (contenido y nombre)
+    if (hasNewContent || updates.nombre) {
+      await storageService.syncNodeSource(updatedNode, updatedNode.contenido_actual);
+    }
+
     // 2. Gestionar autoguardado vs versión confirmada
     if (hasNewContent) {
       if (isAutoSave) {
@@ -559,6 +568,8 @@ exports.compileDocument = async (req, res, next) => {
           actualizado_en: new Date().toISOString()
         })
         .eq('id', node.id);
+
+      await storageService.syncNodeSource(node, content);
     }
 
     const compilationId = crypto.randomUUID();
@@ -589,6 +600,15 @@ exports.compileDocument = async (req, res, next) => {
         finalizado_en: new Date().toISOString()
       })
       .eq('id', compilationId);
+
+    // Guardar el PDF generado en Supabase Storage (el archivo local sigue siendo la copia rápida)
+    if (result.success && result.pdfPath) {
+      try {
+        await storageService.uploadPdf(node, result.pdfPath);
+      } catch (err) {
+        console.warn('Advertencia al subir el PDF a Storage:', err.message);
+      }
+    }
 
     const pdfUrl = result.success ? `/api/documents/${node.id}/pdf` : null;
 
@@ -664,8 +684,14 @@ exports.getPdf = async (req, res, next) => {
     }
 
     const pdfPath = latexService.getCompiledPdfPath(compilation.id);
+    const hasLocalPdf = !!pdfPath && fs.existsSync(pdfPath);
 
-    if (!pdfPath || !fs.existsSync(pdfPath)) {
+    // Si el PDF local ya no existe (otro servidor, disco limpiado), recuperarlo de Supabase Storage
+    const storedPdf = hasLocalPdf
+      ? null
+      : await storageService.downloadFile(storageService.getPdfPath(node));
+
+    if (!hasLocalPdf && !storedPdf) {
       return res.status(404).json({
         error: 'El archivo PDF generado ya no se encuentra en el almacenamiento. Por favor compila de nuevo.'
       });
@@ -676,6 +702,10 @@ exports.getPdf = async (req, res, next) => {
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(baseName)}.pdf"`);
+
+    if (storedPdf) {
+      return res.send(storedPdf);
+    }
 
     const readStream = fs.createReadStream(pdfPath);
     readStream.pipe(res);
