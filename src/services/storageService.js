@@ -35,6 +35,11 @@ function getFilePath(projectId, fileName) {
   return `${getProjectFolder(projectId)}/${toSafeFileName(fileName)}`;
 }
 
+function getNestedFilePath(projectId, fileName) {
+  const parts = String(fileName || '').split('/').map(toSafeFileName).filter(Boolean);
+  return `${getProjectFolder(projectId)}/${parts.join('/')}`;
+}
+
 /**
  * Ruta del PDF compilado de un archivo .tex (mismo nombre, extensión .pdf)
  */
@@ -54,6 +59,14 @@ async function uploadSource(storagePath, content) {
       upsert: true
     });
 
+  if (error) throw error;
+  return storagePath;
+}
+
+async function uploadBinary(storagePath, buffer, contentType = 'application/octet-stream') {
+  const { error } = await supabase.storage
+    .from(BUCKET)
+    .upload(storagePath, buffer, { contentType, upsert: true });
   if (error) throw error;
   return storagePath;
 }
@@ -102,6 +115,18 @@ async function copyFile(fromPath, toPath) {
   return toPath;
 }
 
+async function moveFile(fromPath, toPath) {
+  const { error } = await supabase.storage.from(BUCKET).move(fromPath, toPath);
+  if (error) throw error;
+  return toPath;
+}
+
+async function removeFiles(paths) {
+  if (!paths.length) return;
+  const { error } = await supabase.storage.from(BUCKET).remove(paths);
+  if (error) throw error;
+}
+
 /**
  * Elimina todos los archivos de la carpeta de un proyecto
  */
@@ -131,7 +156,10 @@ async function removeProjectFiles(projectId) {
 async function syncNodeSource(node, content) {
   try {
     const previousPath = node.storage_path || null;
-    const storagePath = await uploadSource(getFilePath(node.proyecto_id, node.nombre), content);
+    const parentFolder = previousPath
+      ? previousPath.slice(0, previousPath.lastIndexOf('/'))
+      : getProjectFolder(node.proyecto_id);
+    const storagePath = await uploadSource(`${parentFolder}/${toSafeFileName(node.nombre)}`, content);
 
     if (previousPath !== storagePath) {
       const { error } = await supabase
@@ -165,11 +193,15 @@ module.exports = {
   BUCKET,
   getProjectFolder,
   getFilePath,
+  getNestedFilePath,
   getPdfPath,
   uploadSource,
+  uploadBinary,
   uploadPdf,
   downloadFile,
   copyFile,
+  moveFile,
+  removeFiles,
   removeProjectFiles,
   syncNodeSource
 };
