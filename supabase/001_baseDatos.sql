@@ -160,6 +160,7 @@ tipo_archivo tipo_archivo,
 contenido_actual text,
 storage_path varchar,
 tamano_bytes integer,
+orden integer not null default 0,
 creado_por uuid references usuarios(id),
 creado_en timestamptz default now(),
 actualizado_en timestamptz

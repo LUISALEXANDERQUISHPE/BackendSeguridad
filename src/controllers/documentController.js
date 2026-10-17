@@ -34,6 +34,48 @@ function isValidUuid(id) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 }
 
+async function resolveProjectAccess(projectId, userId) {
+  if (!isValidUuid(projectId)) return { error: 'Identificador de proyecto inválido', status: 400 };
+  const { data: project, error } = await supabase.from('proyectos').select('*').eq('id', projectId).maybeSingle();
+  if (error) throw error;
+  if (!project) return { error: 'Proyecto no encontrado', status: 404 };
+  if (project.propietario_id === userId) return { project, role: 'propietario' };
+  const { data: membership, error: memberError } = await supabase
+    .from('miembros_proyecto').select('rol').eq('proyecto_id', projectId).eq('usuario_id', userId).maybeSingle();
+  if (memberError) throw memberError;
+  if (!membership) return { error: 'No tienes permisos para acceder a este proyecto', status: 403 };
+  return { project, role: membership.rol };
+}
+
+async function getNodePath(projectId, nodeId) {
+  const { data: allNodes, error } = await supabase.from('nodos').select('id, padre_id, nombre').eq('proyecto_id', projectId);
+  if (error) throw error;
+  const byId = new Map((allNodes || []).map(node => [node.id, node]));
+  const parts = [];
+  let current = byId.get(nodeId);
+  while (current) {
+    parts.unshift(current.nombre);
+    current = byId.get(current.padre_id);
+  }
+  return parts.join('/');
+}
+
+function getFileType(name) {
+  const extension = String(name).split('.').pop()?.toLowerCase();
+  if (extension === 'tex') return 'tex';
+  if (extension === 'bib') return 'bib';
+  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(extension)) return 'imagen';
+  return 'otro';
+}
+
+function canEdit(role) {
+  return role === 'propietario' || role === 'editor';
+}
+
+function isMissingOrderColumn(error) {
+  return Boolean(error?.message && /column .*orden does not exist/i.test(error.message));
+}
+
 /**
  * Helper para verificar permisos y resolver el nodo y proyecto del usuario
  */
@@ -203,6 +245,291 @@ exports.createDocument = async (req, res, next) => {
       }
     });
 
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.listProjectTree = async (req, res, next) => {
+  try {
+    const access = await resolveProjectAccess(req.params.projectId, req.user.id);
+    if (access.error) return res.status(access.status).json({ error: access.error });
+    let query = supabase.from('nodos')
+      .select('id, proyecto_id, padre_id, nombre, tipo_nodo, tipo_archivo, contenido_actual, tamano_bytes, creado_en, actualizado_en, storage_path, orden')
+      .eq('proyecto_id', access.project.id).order('orden', { ascending: true }).order('nombre', { ascending: true });
+    let { data: nodes, error } = await query;
+    if (isMissingOrderColumn(error)) {
+      ({ data: nodes, error } = await supabase.from('nodos')
+        .select('id, proyecto_id, padre_id, nombre, tipo_nodo, contenido_actual, tamano_bytes, creado_en, actualizado_en, storage_path')
+        .eq('proyecto_id', access.project.id).order('nombre', { ascending: true }));
+    }
+    if (error) throw error;
+    return res.json({ project: { id: access.project.id, name: access.project.nombre }, role: access.role, nodes: nodes || [] });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.createProjectNode = async (req, res, next) => {
+  try {
+    const { name, nodeType = 'archivo', parentId = null, content = '', dataBase64, mimeType } = req.body;
+    const access = await resolveProjectAccess(req.params.projectId, req.user.id);
+    if (access.error) return res.status(access.status).json({ error: access.error });
+    if (!canEdit(access.role)) return res.status(403).json({ error: 'No tienes permisos para modificar este proyecto' });
+    const cleanName = String(name || '').trim();
+    if (!cleanName || cleanName.includes('/') || cleanName.includes('\\')) {
+      return res.status(400).json({ error: 'El nombre del archivo o carpeta no es válido' });
+    }
+    if (!['archivo', 'carpeta'].includes(nodeType)) return res.status(400).json({ error: 'Tipo de nodo inválido' });
+    let parentPath = '';
+    if (parentId) {
+      const { data: parent } = await supabase.from('nodos').select('id, proyecto_id, tipo_nodo, padre_id, nombre')
+        .eq('id', parentId).maybeSingle();
+      if (!parent || parent.proyecto_id !== access.project.id || parent.tipo_nodo !== 'carpeta') {
+        return res.status(400).json({ error: 'La carpeta de destino no es válida' });
+      }
+      const allNodes = (await supabase.from('nodos').select('id, padre_id, nombre').eq('proyecto_id', access.project.id)).data || [];
+      const byId = new Map(allNodes.map(node => [node.id, node]));
+      let current = parent;
+      const parts = [];
+      while (current) {
+        parts.unshift(current.nombre);
+        current = byId.get(current.padre_id);
+      }
+      parentPath = parts.join('/');
+    }
+    const fileType = nodeType === 'archivo' ? getFileType(cleanName) : null;
+    const textContent = nodeType === 'archivo' && typeof content === 'string' ? content : null;
+    const buffer = dataBase64 ? Buffer.from(dataBase64, 'base64') : Buffer.from(textContent || '', 'utf8');
+    const storagePath = nodeType === 'archivo'
+      ? storageService.getNestedFilePath(access.project.id, parentPath ? `${parentPath}/${cleanName}` : cleanName)
+      : null;
+    const { data: node, error } = await supabase.from('nodos').insert({
+      proyecto_id: access.project.id, padre_id: parentId, nombre: cleanName, tipo_nodo: nodeType,
+      tipo_archivo: fileType, contenido_actual: textContent, storage_path: storagePath,
+      tamano_bytes: nodeType === 'archivo' ? buffer.length : null, creado_por: req.user.id
+    }).select('*').single();
+    if (error) throw error;
+    if (nodeType === 'archivo') {
+      await storageService.uploadBinary(storagePath, buffer, mimeType || (fileType === 'tex' || fileType === 'bib' ? 'text/plain' : 'application/octet-stream'));
+    }
+    return res.status(201).json({ node });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.updateProjectNode = async (req, res, next) => {
+  try {
+    const access = await resolveProjectAccess(req.params.projectId, req.user.id);
+    if (access.error) return res.status(access.status).json({ error: access.error });
+    if (!canEdit(access.role)) return res.status(403).json({ error: 'No tienes permisos para modificar este proyecto' });
+    const { data: node, error: nodeError } = await supabase.from('nodos').select('*')
+      .eq('id', req.params.nodeId).eq('proyecto_id', access.project.id).maybeSingle();
+    if (nodeError) throw nodeError;
+    if (!node) return res.status(404).json({ error: 'Archivo o carpeta no encontrado' });
+    const name = String(req.body.name || '').trim();
+    if (!name || name.includes('/') || name.includes('\\')) return res.status(400).json({ error: 'El nombre no es válido' });
+    let finalName = name;
+    if (node.tipo_nodo === 'archivo') {
+      const originalExtension = path.extname(node.nombre);
+      const requestedExtension = path.extname(name);
+      if (originalExtension && requestedExtension && originalExtension.toLowerCase() !== requestedExtension.toLowerCase()) {
+        return res.status(400).json({ error: 'La extensión del archivo no se puede cambiar' });
+      }
+      if (originalExtension && !requestedExtension) finalName = `${name}${originalExtension}`;
+    }
+    const oldRelativePath = await getNodePath(access.project.id, node.id);
+    const newRelativePath = `${oldRelativePath.slice(0, oldRelativePath.lastIndexOf('/') + 1)}${finalName}`;
+    const oldPath = node.storage_path;
+    const newPath = node.tipo_nodo === 'archivo' ? storageService.getNestedFilePath(access.project.id, newRelativePath) : null;
+    if (oldPath && newPath && oldPath !== newPath) await storageService.moveFile(oldPath, newPath);
+    if (node.tipo_nodo === 'carpeta') {
+      const { data: descendants } = await supabase.from('nodos').select('id, storage_path')
+        .eq('proyecto_id', access.project.id).like('storage_path', `${storageService.getNestedFilePath(access.project.id, oldRelativePath)}/%`);
+      for (const child of descendants || []) {
+        const childPath = child.storage_path;
+        const renamedPath = childPath.replace(
+          storageService.getNestedFilePath(access.project.id, oldRelativePath),
+          storageService.getNestedFilePath(access.project.id, newRelativePath)
+        );
+        await storageService.moveFile(childPath, renamedPath);
+        await supabase.from('nodos').update({ storage_path: renamedPath }).eq('id', child.id);
+      }
+    }
+    const { data: updated, error } = await supabase.from('nodos').update({
+      nombre: finalName, storage_path: newPath, actualizado_en: new Date().toISOString()
+    }).eq('id', node.id).select('*').single();
+    if (error) throw error;
+    return res.json({ node: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.moveProjectNode = async (req, res, next) => {
+  try {
+    const access = await resolveProjectAccess(req.params.projectId, req.user.id);
+    if (access.error) return res.status(access.status).json({ error: access.error });
+    if (!canEdit(access.role)) return res.status(403).json({ error: 'No tienes permisos para modificar este proyecto' });
+    const parentId = req.body.parentId || null;
+    const requestedOrder = Number.isInteger(req.body.order) ? req.body.order : 0;
+    const { data: node, error: nodeError } = await supabase.from('nodos').select('*')
+      .eq('id', req.params.nodeId).eq('proyecto_id', access.project.id).maybeSingle();
+    if (nodeError) throw nodeError;
+    if (!node) return res.status(404).json({ error: 'Archivo o carpeta no encontrado' });
+    let { data: allNodes, error: allNodesError } = await supabase.from('nodos')
+      .select('id, padre_id, nombre, tipo_nodo, storage_path, orden').eq('proyecto_id', access.project.id);
+    const supportsOrder = !isMissingOrderColumn(allNodesError);
+    if (!supportsOrder) {
+      ({ data: allNodes, error: allNodesError } = await supabase.from('nodos')
+        .select('id, padre_id, nombre, tipo_nodo, storage_path').eq('proyecto_id', access.project.id));
+    }
+    if (allNodesError) throw allNodesError;
+    const nodesById = new Map((allNodes || []).map(item => [item.id, item]));
+    if (parentId) {
+      const parent = nodesById.get(parentId);
+      if (!parent || parent.tipo_nodo !== 'carpeta') return res.status(400).json({ error: 'La carpeta de destino no es válida' });
+    }
+    let ancestor = parentId;
+    while (ancestor) {
+      if (ancestor === node.id) return res.status(400).json({ error: 'No puedes mover una carpeta dentro de sí misma' });
+      ancestor = nodesById.get(ancestor)?.padre_id || null;
+    }
+    const oldRelativePath = await getNodePath(access.project.id, node.id);
+    const newParentPath = parentId ? await getNodePath(access.project.id, parentId) : '';
+    const newRelativePath = `${newParentPath ? `${newParentPath}/` : ''}${node.nombre}`;
+    const oldStoragePrefix = storageService.getNestedFilePath(access.project.id, oldRelativePath);
+    const newStoragePrefix = storageService.getNestedFilePath(access.project.id, newRelativePath);
+    const descendants = (allNodes || []).filter(item => item.storage_path && item.storage_path.startsWith(`${oldStoragePrefix}/`));
+    for (const child of descendants) {
+      const newPath = child.storage_path.replace(oldStoragePrefix, newStoragePrefix);
+      await storageService.moveFile(child.storage_path, newPath);
+      const { error } = await supabase.from('nodos').update({ storage_path: newPath }).eq('id', child.id);
+      if (error) throw error;
+    }
+    let siblingsQuery = supabase.from('nodos').select(supportsOrder ? 'id, orden' : 'id')
+      .eq('proyecto_id', access.project.id).eq('padre_id', parentId).neq('id', node.id);
+    if (supportsOrder) siblingsQuery = siblingsQuery.order('orden', { ascending: true });
+    else siblingsQuery = siblingsQuery.order('nombre', { ascending: true });
+    const { data: siblings } = await siblingsQuery;
+    const boundedOrder = Math.max(0, Math.min(requestedOrder, (siblings || []).length));
+    if (supportsOrder) {
+      for (let index = 0; index < (siblings || []).length; index += 1) {
+        const sibling = siblings[index];
+        const order = index >= boundedOrder ? index + 1 : index;
+        const { error } = await supabase.from('nodos').update({ orden: order }).eq('id', sibling.id);
+        if (error) throw error;
+      }
+    }
+    const moveUpdates = {
+      padre_id: parentId,
+      storage_path: node.tipo_nodo === 'archivo' ? newStoragePrefix : null,
+      actualizado_en: new Date().toISOString()
+    };
+    if (supportsOrder) moveUpdates.orden = boundedOrder;
+    const { data: moved, error: moveError } = await supabase.from('nodos').update(moveUpdates)
+      .eq('id', node.id).select('*').single();
+    if (moveError) throw moveError;
+    return res.json({ node: moved });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.deleteProjectNode = async (req, res, next) => {
+  try {
+    const access = await resolveProjectAccess(req.params.projectId, req.user.id);
+    if (access.error) return res.status(access.status).json({ error: access.error });
+    if (!canEdit(access.role)) return res.status(403).json({ error: 'No tienes permisos para modificar este proyecto' });
+    const { data: allNodes, error: nodesError } = await supabase.from('nodos').select('id, padre_id, storage_path')
+      .eq('proyecto_id', access.project.id);
+    if (nodesError) throw nodesError;
+    const ids = new Set([req.params.nodeId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      (allNodes || []).forEach(node => {
+        if (ids.has(node.padre_id) && !ids.has(node.id)) {
+          ids.add(node.id);
+          changed = true;
+        }
+      });
+    }
+    const storagePaths = (allNodes || []).filter(node => ids.has(node.id) && node.storage_path).map(node => node.storage_path);
+    await storageService.removeFiles(storagePaths);
+    const nodeIds = Array.from(ids);
+
+    // These tables reference nodos without ON DELETE CASCADE. Remove their
+    // records first so deleting the tree cannot leave a partial state.
+    for (const table of ['compilaciones', 'versiones_archivo', 'estados_autoguardado', 'permisos_archivo', 'sesiones_edicion']) {
+      const column = table === 'compilaciones' ? 'archivo_principal_id' : table === 'permisos_archivo' ? 'nodo_id' : 'archivo_id';
+      const { error } = await supabase.from(table).delete().in(column, nodeIds);
+      if (error) throw error;
+    }
+
+    const { data: comments, error: commentsError } = await supabase
+      .from('comentarios')
+      .select('id, archivo_id, comentario_padre_id')
+      .in('archivo_id', nodeIds);
+    if (commentsError) throw commentsError;
+    const commentIds = new Set((comments || []).map(comment => comment.id));
+    const commentsToDelete = (comments || []).sort((left, right) => {
+      const depth = (comment) => {
+        let value = 0;
+        let current = comment;
+        while (current?.comentario_padre_id && commentIds.has(current.comentario_padre_id)) {
+          value += 1;
+          current = comments.find(item => item.id === current.comentario_padre_id);
+        }
+        return value;
+      };
+      return depth(right) - depth(left);
+    });
+    for (const comment of commentsToDelete) {
+      const { error } = await supabase.from('comentarios').delete().eq('id', comment.id);
+      if (error) throw error;
+    }
+
+    const nodesById = new Map((allNodes || []).map(node => [node.id, node]));
+    const deletionOrder = Array.from(ids).sort((left, right) => {
+      let leftDepth = 0;
+      let rightDepth = 0;
+      let current = nodesById.get(left);
+      while (current?.padre_id) {
+        leftDepth += 1;
+        current = nodesById.get(current.padre_id);
+      }
+      current = nodesById.get(right);
+      while (current?.padre_id) {
+        rightDepth += 1;
+        current = nodesById.get(current.padre_id);
+      }
+      return rightDepth - leftDepth;
+    });
+    for (const nodeId of deletionOrder) {
+      const { error } = await supabase.from('nodos').delete().eq('id', nodeId).eq('proyecto_id', access.project.id);
+      if (error) throw error;
+    }
+    return res.json({ message: 'Elemento eliminado correctamente' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.downloadProjectNode = async (req, res, next) => {
+  try {
+    const access = await resolveProjectAccess(req.params.projectId, req.user.id);
+    if (access.error) return res.status(access.status).json({ error: access.error });
+    const { data: node, error } = await supabase.from('nodos').select('nombre, tipo_nodo, storage_path, contenido_actual')
+      .eq('id', req.params.nodeId).eq('proyecto_id', access.project.id).maybeSingle();
+    if (error) throw error;
+    if (!node || node.tipo_nodo !== 'archivo') return res.status(404).json({ error: 'Archivo no encontrado' });
+    const buffer = node.storage_path ? await storageService.downloadFile(node.storage_path) : Buffer.from(node.contenido_actual || '', 'utf8');
+    if (!buffer) return res.status(404).json({ error: 'El archivo no está disponible' });
+    res.setHeader('Content-Disposition', `attachment; filename="${node.nombre.replace(/"/g, '')}"`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    return res.send(buffer);
   } catch (error) {
     next(error);
   }
@@ -750,4 +1077,3 @@ exports.getSource = async (req, res, next) => {
     next(error);
   }
 };
-
