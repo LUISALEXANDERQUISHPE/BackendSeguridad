@@ -4,7 +4,9 @@
 module.exports = (err, req, res, next) => {
   console.error(err.stack);
 
-  const statusCode = err.statusCode || 500;
+  // Supabase devuelve statusCode como texto (ej. "404"); Express exige un entero válido
+  const parsedStatus = Number.parseInt(err.statusCode ?? err.status, 10);
+  const statusCode = parsedStatus >= 400 && parsedStatus <= 599 ? parsedStatus : 500;
   const message = err.message || 'Error interno del servidor';
 
   res.status(statusCode).json({
