@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const supabase = require('../config/supabase');
 const latexService = require('../services/latexService');
 const storageService = require('../services/storageService');
+const { isTextFile } = require('../utils/fileTypes');
 
 const MAX_NAME_LENGTH = 120;
 const MAX_DESCRIPTION_LENGTH = 500;
@@ -675,7 +676,7 @@ exports.duplicateProject = async (req, res, next) => {
           : n.nombre,
         tipo_nodo: n.tipo_nodo,
         tipo_archivo: n.tipo_archivo,
-        contenido_actual: n.contenido_actual,
+        contenido_actual: n.tipo_nodo === 'archivo' && isTextFile(n.nombre) ? n.contenido_actual : null,
         // Cada copia tendrá su propio archivo en Storage (se asigna más abajo)
         storage_path: null,
         tamano_bytes: n.tamano_bytes,
@@ -696,7 +697,7 @@ exports.duplicateProject = async (req, res, next) => {
 
         // 3. Snapshot inicial para cada archivo de texto copiado
         const versions = newNodes
-          .filter(n => n.tipo_nodo === 'archivo' && typeof n.contenido_actual === 'string')
+          .filter(n => n.tipo_nodo === 'archivo' && isTextFile(n.nombre) && typeof n.contenido_actual === 'string')
           .map(n => ({
             archivo_id: n.id,
             numero_version: 1,
@@ -713,31 +714,36 @@ exports.duplicateProject = async (req, res, next) => {
           if (versionError) throw versionError;
         }
 
-        // 4. Guardar en Supabase Storage los archivos de la copia
+        // 4. Guardar en Supabase Storage los archivos de la copia, conservando la ruta de carpetas
+        const sourceById = new Map((sourceNodes || []).map(n => [n.id, n]));
+        const relativePathOf = (node) => {
+          const parts = [];
+          let current = node;
+          while (current && parts.length < 64) {
+            parts.unshift(current.nombre);
+            current = current.padre_id ? sourceById.get(current.padre_id) : null;
+          }
+          return parts.join('/');
+        };
+
         for (const sourceNode of sourceNodes || []) {
           if (sourceNode.tipo_nodo !== 'archivo') continue;
 
           const newNode = newNodes.find(n => n.id === idMap.get(sourceNode.id));
+          const targetPath = storageService.getNestedFilePath(project.id, relativePathOf({ ...sourceNode, nombre: newNode.nombre }));
 
-          if (typeof sourceNode.contenido_actual === 'string') {
-            await storageService.syncNodeSource(newNode, sourceNode.contenido_actual);
-          } else if (sourceNode.storage_path) {
-            // Binarios (imágenes, etc.): copiar el objeto dentro del bucket
-            try {
-              const extension = sourceNode.storage_path.includes('.')
-                ? sourceNode.storage_path.split('.').pop()
-                : 'bin';
-              const copyPath = await storageService.copyFile(
-                sourceNode.storage_path,
-                storageService.getFilePath(
-                  project.id,
-                  newNode.nombre.includes('.') ? newNode.nombre : `${newNode.nombre}.${extension}`
-                )
-              );
-              await supabase.from('nodos').update({ storage_path: copyPath }).eq('id', newNode.id);
-            } catch (err) {
-              console.warn('Advertencia al copiar archivo en Storage:', err.message);
+          try {
+            if (isTextFile(sourceNode.nombre) && typeof sourceNode.contenido_actual === 'string') {
+              await storageService.uploadSource(targetPath, sourceNode.contenido_actual);
+            } else if (sourceNode.storage_path) {
+              // Binarios (imágenes, PDFs, etc.): copiar el objeto dentro del bucket
+              await storageService.copyFile(sourceNode.storage_path, targetPath);
+            } else {
+              continue;
             }
+            await supabase.from('nodos').update({ storage_path: targetPath }).eq('id', newNode.id);
+          } catch (err) {
+            console.warn('Advertencia al copiar archivo en Storage:', err.message);
           }
         }
       }

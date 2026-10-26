@@ -4,6 +4,7 @@ const fs = require('fs');
 const supabase = require('../config/supabase');
 const latexService = require('../services/latexService');
 const storageService = require('../services/storageService');
+const { getFileType, getMimeType, isTextFile, isValidNodeName } = require('../utils/fileTypes');
 
 // Plantilla inicial por defecto para nuevos documentos LaTeX
 const DEFAULT_LATEX_TEMPLATE = `\\documentclass{article}
@@ -47,25 +48,164 @@ async function resolveProjectAccess(projectId, userId) {
   return { project, role: membership.rol };
 }
 
-async function getNodePath(projectId, nodeId) {
-  const { data: allNodes, error } = await supabase.from('nodos').select('id, padre_id, nombre').eq('proyecto_id', projectId);
-  if (error) throw error;
-  const byId = new Map((allNodes || []).map(node => [node.id, node]));
-  const parts = [];
-  let current = byId.get(nodeId);
-  while (current) {
-    parts.unshift(current.nombre);
-    current = byId.get(current.padre_id);
-  }
-  return parts.join('/');
+/**
+ * Construye la ruta relativa (ej. "capitulos/intro.tex") de cada nodo del proyecto a partir de padre_id
+ * @returns {Map<string, string>} nodo_id -> ruta relativa
+ */
+function buildRelativePaths(nodes) {
+  const byId = new Map(nodes.map(node => [node.id, node]));
+  const paths = new Map();
+  const resolvePath = (node, depth = 0) => {
+    if (paths.has(node.id)) return paths.get(node.id);
+    const parent = node.padre_id ? byId.get(node.padre_id) : null;
+    // depth evita ciclos en datos corruptos
+    const value = parent && depth < 64 ? `${resolvePath(parent, depth + 1)}/${node.nombre}` : node.nombre;
+    paths.set(node.id, value);
+    return value;
+  };
+  nodes.forEach(node => resolvePath(node));
+  return paths;
 }
 
-function getFileType(name) {
-  const extension = String(name).split('.').pop()?.toLowerCase();
-  if (extension === 'tex') return 'tex';
-  if (extension === 'bib') return 'bib';
-  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(extension)) return 'imagen';
-  return 'otro';
+/**
+ * Indica si un código .tex es un documento completo (tiene \documentclass fuera de comentarios)
+ */
+function isStandaloneDocument(content) {
+  return String(content || '').split(/\r?\n/).some(line => /^[^%]*\\documentclass\s*[[{]/.test(line));
+}
+
+/**
+ * Elige el archivo .tex que se compila: el archivo abierto si es un documento completo; si no
+ * (un capítulo incluido con \input, un .bib, una imagen...), el documento principal del proyecto:
+ * primero un .tex con \documentclass en la raíz, luego en cualquier carpeta, y por último el .tex más antiguo.
+ */
+function selectMainNode(nodes, currentNode, currentContent) {
+  const texNodes = nodes
+    .filter(node => node.tipo_nodo === 'archivo' && /\.tex$/i.test(node.nombre))
+    .sort((left, right) => new Date(left.creado_en) - new Date(right.creado_en));
+  const contentOf = node => (node.id === currentNode?.id && typeof currentContent === 'string' ? currentContent : node.contenido_actual);
+
+  if (currentNode && /\.tex$/i.test(currentNode.nombre) && isStandaloneDocument(contentOf(currentNode))) {
+    return currentNode;
+  }
+
+  return texNodes.find(node => !node.padre_id && isStandaloneDocument(contentOf(node)))
+    || texNodes.find(node => isStandaloneDocument(contentOf(node)))
+    || texNodes.find(node => !node.padre_id)
+    || texNodes[0]
+    || null;
+}
+
+/**
+ * Obtiene todos los archivos del proyecto listos para escribirse en el sandbox de compilación.
+ * Los archivos de texto salen de la base de datos (versión más reciente); los binarios de Storage.
+ */
+async function getProjectFilesForCompilation(nodes, overrides = new Map()) {
+  const relativePaths = buildRelativePaths(nodes);
+
+  return Promise.all(nodes.map(async (node) => {
+    const filePath = relativePaths.get(node.id);
+    if (node.tipo_nodo === 'carpeta') return { path: filePath, isDirectory: true };
+
+    if (overrides.has(node.id)) return { path: filePath, content: overrides.get(node.id) };
+
+    if (isTextFile(node.nombre) && node.contenido_actual) {
+      return { path: filePath, content: node.contenido_actual };
+    }
+
+    const stored = node.storage_path ? await storageService.downloadFile(node.storage_path) : null;
+    return { path: filePath, content: stored || Buffer.from(node.contenido_actual || '', 'utf8') };
+  }));
+}
+
+/**
+ * Guarda en Storage el archivo de un nodo en su ruta nueva, con el mismo formato que al crear archivos
+ * (createProjectNode). Los de texto se vuelven a subir desde contenido_actual, así no dependen de que
+ * el objeto anterior exista en el bucket; los binarios se mueven.
+ */
+async function relocateNodeFile(node, newPath) {
+  const oldPath = node.storage_path || null;
+  if (oldPath === newPath) return;
+
+  if (isTextFile(node.nombre) && typeof node.contenido_actual === 'string') {
+    await storageService.uploadBinary(newPath, Buffer.from(node.contenido_actual, 'utf8'), 'text/plain; charset=utf-8');
+    if (oldPath) await storageService.removeFiles([oldPath]).catch(() => {});
+  } else if (oldPath) {
+    try {
+      await storageService.moveFile(oldPath, newPath);
+    } catch (err) {
+      // El objeto no estaba en la ruta registrada: si se puede leer, copiarlo; si no, solo se actualiza la ruta
+      const data = await storageService.downloadFile(oldPath);
+      if (data) {
+        await storageService.uploadBinary(newPath, data, getMimeType(node.nombre));
+        await storageService.removeFiles([oldPath]).catch(() => {});
+      } else {
+        console.warn(`Advertencia: el archivo ${oldPath} no existe en Storage (${err.message})`);
+      }
+    }
+  }
+
+  const { error } = await supabase.from('nodos').update({ storage_path: newPath }).eq('id', node.id);
+  if (error) throw error;
+}
+
+/**
+ * Tras renombrar o mover un nodo, lleva a su ruta nueva en Storage el archivo (o todos los archivos
+ * de la carpeta y sus subcarpetas), calculando las rutas desde el árbol igual que al crearlos.
+ */
+async function syncSubtreeStorage(projectId, rootNodeId) {
+  const { data: nodes, error } = await supabase.from('nodos')
+    .select('id, padre_id, nombre, tipo_nodo, contenido_actual, storage_path')
+    .eq('proyecto_id', projectId);
+  if (error) throw error;
+
+  const relativePaths = buildRelativePaths(nodes || []);
+  const byId = new Map((nodes || []).map(node => [node.id, node]));
+  const isInSubtree = (node) => {
+    for (let current = node, depth = 0; current && depth < 64; current = byId.get(current.padre_id), depth++) {
+      if (current.id === rootNodeId) return true;
+    }
+    return false;
+  };
+
+  for (const node of nodes || []) {
+    if (node.tipo_nodo !== 'archivo' || !isInSubtree(node)) continue;
+    await relocateNodeFile(node, storageService.getNestedFilePath(projectId, relativePaths.get(node.id)));
+  }
+}
+
+async function findNameConflict(projectId, parentId, name, excludeId = null) {
+  let query = supabase.from('nodos').select('id, nombre').eq('proyecto_id', projectId);
+  query = parentId ? query.eq('padre_id', parentId) : query.is('padre_id', null);
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []).some(node => node.id !== excludeId && node.nombre.toLowerCase() === name.toLowerCase());
+}
+
+/**
+ * Última compilación del proyecto (y última exitosa con PDF). Se consulta por proyecto para que el
+ * PDF se muestre sin importar qué archivo del proyecto esté abierto en el editor.
+ */
+async function getProjectCompilations(projectId) {
+  const { data: lastCompilation } = await supabase
+    .from('compilaciones')
+    .select('id, archivo_principal_id, estado, pdf_output_path, iniciado_en, finalizado_en')
+    .eq('proyecto_id', projectId)
+    .order('iniciado_en', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { data: lastSuccessfulCompilation } = await supabase
+    .from('compilaciones')
+    .select('id, archivo_principal_id, pdf_output_path, finalizado_en')
+    .eq('proyecto_id', projectId)
+    .eq('estado', 'exitosa')
+    .not('pdf_output_path', 'is', null)
+    .order('iniciado_en', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return { lastCompilation, lastSuccessfulCompilation };
 }
 
 function canEdit(role) {
@@ -277,10 +417,13 @@ exports.createProjectNode = async (req, res, next) => {
     if (access.error) return res.status(access.status).json({ error: access.error });
     if (!canEdit(access.role)) return res.status(403).json({ error: 'No tienes permisos para modificar este proyecto' });
     const cleanName = String(name || '').trim();
-    if (!cleanName || cleanName.includes('/') || cleanName.includes('\\')) {
-      return res.status(400).json({ error: 'El nombre del archivo o carpeta no es válido' });
+    if (!isValidNodeName(cleanName)) {
+      return res.status(400).json({ error: 'El nombre del archivo o carpeta no es válido (no uses / \\ : * ? " < > | ni los nombres "." o "..")' });
     }
     if (!['archivo', 'carpeta'].includes(nodeType)) return res.status(400).json({ error: 'Tipo de nodo inválido' });
+    if (await findNameConflict(access.project.id, parentId, cleanName)) {
+      return res.status(409).json({ error: `Ya existe un archivo o carpeta llamado "${cleanName}" en esta ubicación` });
+    }
     let parentPath = '';
     if (parentId) {
       const { data: parent } = await supabase.from('nodos').select('id, proyecto_id, tipo_nodo, padre_id, nombre')
@@ -299,8 +442,11 @@ exports.createProjectNode = async (req, res, next) => {
       parentPath = parts.join('/');
     }
     const fileType = nodeType === 'archivo' ? getFileType(cleanName) : null;
-    const textContent = nodeType === 'archivo' && typeof content === 'string' ? content : null;
-    const buffer = dataBase64 ? Buffer.from(dataBase64, 'base64') : Buffer.from(textContent || '', 'utf8');
+    const isText = nodeType === 'archivo' && isTextFile(cleanName);
+    const buffer = dataBase64 ? Buffer.from(dataBase64, 'base64') : Buffer.from(typeof content === 'string' ? content : '', 'utf8');
+    // Archivos de texto (.tex, .bib, .csv, .sty...) se guardan también en contenido_actual para editarlos y compilarlos;
+    // los binarios (imágenes, PDFs...) viven solo en Storage para no corromperlos.
+    const textContent = isText ? buffer.toString('utf8').replace(/^﻿/, '') : null;
     const storagePath = nodeType === 'archivo'
       ? storageService.getNestedFilePath(access.project.id, parentPath ? `${parentPath}/${cleanName}` : cleanName)
       : null;
@@ -311,7 +457,7 @@ exports.createProjectNode = async (req, res, next) => {
     }).select('*').single();
     if (error) throw error;
     if (nodeType === 'archivo') {
-      await storageService.uploadBinary(storagePath, buffer, mimeType || (fileType === 'tex' || fileType === 'bib' ? 'text/plain' : 'application/octet-stream'));
+      await storageService.uploadBinary(storagePath, buffer, isText ? 'text/plain; charset=utf-8' : (mimeType || getMimeType(cleanName)));
     }
     return res.status(201).json({ node });
   } catch (error) {
@@ -329,7 +475,7 @@ exports.updateProjectNode = async (req, res, next) => {
     if (nodeError) throw nodeError;
     if (!node) return res.status(404).json({ error: 'Archivo o carpeta no encontrado' });
     const name = String(req.body.name || '').trim();
-    if (!name || name.includes('/') || name.includes('\\')) return res.status(400).json({ error: 'El nombre no es válido' });
+    if (!isValidNodeName(name)) return res.status(400).json({ error: 'El nombre no es válido' });
     let finalName = name;
     if (node.tipo_nodo === 'archivo') {
       const originalExtension = path.extname(node.nombre);
@@ -339,28 +485,16 @@ exports.updateProjectNode = async (req, res, next) => {
       }
       if (originalExtension && !requestedExtension) finalName = `${name}${originalExtension}`;
     }
-    const oldRelativePath = await getNodePath(access.project.id, node.id);
-    const newRelativePath = `${oldRelativePath.slice(0, oldRelativePath.lastIndexOf('/') + 1)}${finalName}`;
-    const oldPath = node.storage_path;
-    const newPath = node.tipo_nodo === 'archivo' ? storageService.getNestedFilePath(access.project.id, newRelativePath) : null;
-    if (oldPath && newPath && oldPath !== newPath) await storageService.moveFile(oldPath, newPath);
-    if (node.tipo_nodo === 'carpeta') {
-      const { data: descendants } = await supabase.from('nodos').select('id, storage_path')
-        .eq('proyecto_id', access.project.id).like('storage_path', `${storageService.getNestedFilePath(access.project.id, oldRelativePath)}/%`);
-      for (const child of descendants || []) {
-        const childPath = child.storage_path;
-        const renamedPath = childPath.replace(
-          storageService.getNestedFilePath(access.project.id, oldRelativePath),
-          storageService.getNestedFilePath(access.project.id, newRelativePath)
-        );
-        await storageService.moveFile(childPath, renamedPath);
-        await supabase.from('nodos').update({ storage_path: renamedPath }).eq('id', child.id);
-      }
+    if (await findNameConflict(access.project.id, node.padre_id, finalName, node.id)) {
+      return res.status(409).json({ error: `Ya existe un archivo o carpeta llamado "${finalName}" en esta ubicación` });
     }
-    const { data: updated, error } = await supabase.from('nodos').update({
-      nombre: finalName, storage_path: newPath, actualizado_en: new Date().toISOString()
-    }).eq('id', node.id).select('*').single();
+    const { error } = await supabase.from('nodos').update({
+      nombre: finalName, actualizado_en: new Date().toISOString()
+    }).eq('id', node.id);
     if (error) throw error;
+    await syncSubtreeStorage(access.project.id, node.id);
+    const { data: updated, error: updatedError } = await supabase.from('nodos').select('*').eq('id', node.id).single();
+    if (updatedError) throw updatedError;
     return res.json({ node: updated });
   } catch (error) {
     next(error);
@@ -396,17 +530,8 @@ exports.moveProjectNode = async (req, res, next) => {
       if (ancestor === node.id) return res.status(400).json({ error: 'No puedes mover una carpeta dentro de sí misma' });
       ancestor = nodesById.get(ancestor)?.padre_id || null;
     }
-    const oldRelativePath = await getNodePath(access.project.id, node.id);
-    const newParentPath = parentId ? await getNodePath(access.project.id, parentId) : '';
-    const newRelativePath = `${newParentPath ? `${newParentPath}/` : ''}${node.nombre}`;
-    const oldStoragePrefix = storageService.getNestedFilePath(access.project.id, oldRelativePath);
-    const newStoragePrefix = storageService.getNestedFilePath(access.project.id, newRelativePath);
-    const descendants = (allNodes || []).filter(item => item.storage_path && item.storage_path.startsWith(`${oldStoragePrefix}/`));
-    for (const child of descendants) {
-      const newPath = child.storage_path.replace(oldStoragePrefix, newStoragePrefix);
-      await storageService.moveFile(child.storage_path, newPath);
-      const { error } = await supabase.from('nodos').update({ storage_path: newPath }).eq('id', child.id);
-      if (error) throw error;
+    if (node.padre_id !== parentId && await findNameConflict(access.project.id, parentId, node.nombre, node.id)) {
+      return res.status(409).json({ error: `Ya existe un archivo o carpeta llamado "${node.nombre}" en la carpeta de destino` });
     }
     let siblingsQuery = supabase.from('nodos').select(supportsOrder ? 'id, orden' : 'id')
       .eq('proyecto_id', access.project.id).eq('padre_id', parentId).neq('id', node.id);
@@ -424,13 +549,15 @@ exports.moveProjectNode = async (req, res, next) => {
     }
     const moveUpdates = {
       padre_id: parentId,
-      storage_path: node.tipo_nodo === 'archivo' ? newStoragePrefix : null,
       actualizado_en: new Date().toISOString()
     };
     if (supportsOrder) moveUpdates.orden = boundedOrder;
-    const { data: moved, error: moveError } = await supabase.from('nodos').update(moveUpdates)
-      .eq('id', node.id).select('*').single();
+    const { error: moveError } = await supabase.from('nodos').update(moveUpdates).eq('id', node.id);
     if (moveError) throw moveError;
+    // Mover también el archivo (o los de la carpeta) en Storage a la nueva ruta
+    if (node.padre_id !== parentId) await syncSubtreeStorage(access.project.id, node.id);
+    const { data: moved, error: movedError } = await supabase.from('nodos').select('*').eq('id', node.id).single();
+    if (movedError) throw movedError;
     return res.json({ node: moved });
   } catch (error) {
     next(error);
@@ -527,8 +654,9 @@ exports.downloadProjectNode = async (req, res, next) => {
     if (!node || node.tipo_nodo !== 'archivo') return res.status(404).json({ error: 'Archivo no encontrado' });
     const buffer = node.storage_path ? await storageService.downloadFile(node.storage_path) : Buffer.from(node.contenido_actual || '', 'utf8');
     if (!buffer) return res.status(404).json({ error: 'El archivo no está disponible' });
-    res.setHeader('Content-Disposition', `attachment; filename="${node.nombre.replace(/"/g, '')}"`);
-    res.setHeader('Content-Type', 'application/octet-stream');
+    const disposition = req.query.inline === 'true' ? 'inline' : 'attachment';
+    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(node.nombre)}"`);
+    res.setHeader('Content-Type', getMimeType(node.nombre));
     return res.send(buffer);
   } catch (error) {
     next(error);
@@ -656,25 +784,8 @@ exports.getDocumentById = async (req, res, next) => {
       .eq('usuario_id', userId)
       .maybeSingle();
 
-    // Obtener la última compilación (estado actual de compilación)
-    const { data: lastCompilation } = await supabase
-      .from('compilaciones')
-      .select('id, estado, pdf_output_path, iniciado_en, finalizado_en')
-      .eq('archivo_principal_id', node.id)
-      .order('iniciado_en', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    // Obtener la última compilación exitosa (para mantener el PDF disponible aún si la última falló)
-    const { data: lastSuccessfulCompilation } = await supabase
-      .from('compilaciones')
-      .select('id, pdf_output_path, finalizado_en')
-      .eq('archivo_principal_id', node.id)
-      .eq('estado', 'exitosa')
-      .not('pdf_output_path', 'is', null)
-      .order('iniciado_en', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // Última compilación del proyecto y última exitosa (para mantener el PDF disponible aún si la última falló)
+    const { lastCompilation, lastSuccessfulCompilation } = await getProjectCompilations(project.id);
 
     return res.json({
       document: {
@@ -682,7 +793,9 @@ exports.getDocumentById = async (req, res, next) => {
         projectId: project.id,
         projectName: project.nombre,
         name: node.nombre,
-        content: node.contenido_actual,
+        content: isTextFile(node.nombre) ? node.contenido_actual : null,
+        fileType: node.tipo_archivo,
+        isText: isTextFile(node.nombre),
         sizeBytes: node.tamano_bytes,
         role,
         createdAt: node.creado_en,
@@ -728,13 +841,21 @@ exports.updateDocument = async (req, res, next) => {
       return res.status(403).json({ error: 'No tienes permisos de edición en este documento' });
     }
 
+    // Guardar texto sobre un binario (imagen, PDF...) lo dejaría corrupto en Storage
+    if (typeof content === 'string' && !isTextFile(node.nombre)) {
+      return res.status(400).json({ error: 'Este archivo es binario y no se puede editar como texto' });
+    }
+
     const updates = {
       actualizado_en: new Date().toISOString()
     };
 
     if (name && typeof name === 'string') {
       const cleanName = name.trim();
-      updates.nombre = cleanName.toLowerCase().endsWith('.tex') ? cleanName : `${cleanName}.tex`;
+      if (!isValidNodeName(cleanName)) return res.status(400).json({ error: 'El nombre no es válido' });
+      // Conservar la extensión original si el nuevo nombre no trae una
+      const originalExtension = path.extname(node.nombre);
+      updates.nombre = path.extname(cleanName) || !originalExtension ? cleanName : `${cleanName}${originalExtension}`;
     }
 
     const hasNewContent = typeof content === 'string';
@@ -883,10 +1004,10 @@ exports.compileDocument = async (req, res, next) => {
 
     const { node, project } = access;
 
-    // Si se envía código nuevo en el body, usarlo para compilar y actualizar el nodo
-    const codeToCompile = typeof content === 'string' ? content : node.contenido_actual;
+    // El contenido enviado es el del archivo abierto en el editor (solo aplica a archivos de texto)
+    const hasNewContent = typeof content === 'string' && isTextFile(node.nombre);
 
-    if (typeof content === 'string' && content !== node.contenido_actual) {
+    if (hasNewContent && content !== node.contenido_actual) {
       await supabase
         .from('nodos')
         .update({
@@ -899,6 +1020,24 @@ exports.compileDocument = async (req, res, next) => {
       await storageService.syncNodeSource(node, content);
     }
 
+    // Todos los archivos del proyecto: se compilan juntos para que \input, \include,
+    // \includegraphics, \bibliography, \addbibresource, etc. encuentren sus archivos
+    const { data: projectNodes, error: nodesError } = await supabase
+      .from('nodos')
+      .select('id, padre_id, nombre, tipo_nodo, tipo_archivo, contenido_actual, storage_path, creado_en')
+      .eq('proyecto_id', project.id);
+
+    if (nodesError) throw nodesError;
+
+    const mainNode = selectMainNode(projectNodes || [], node, hasNewContent ? content : undefined);
+    if (!mainNode) {
+      return res.status(400).json({ error: 'El proyecto no tiene ningún archivo .tex para compilar' });
+    }
+
+    const overrides = new Map(hasNewContent ? [[node.id, content]] : []);
+    const projectFiles = await getProjectFilesForCompilation(projectNodes || [], overrides);
+    const mainFilePath = buildRelativePaths(projectNodes || []).get(mainNode.id);
+
     const compilationId = crypto.randomUUID();
 
     // Registrar inicio de la compilación en base de datos
@@ -907,14 +1046,14 @@ exports.compileDocument = async (req, res, next) => {
       .insert({
         id: compilationId,
         proyecto_id: project.id,
-        archivo_principal_id: node.id,
+        archivo_principal_id: mainNode.id,
         estado: 'en_proceso',
         solicitado_por: userId,
         iniciado_en: new Date().toISOString()
       });
 
     // Ejecutar compilación segura
-    const result = await latexService.compileLatex(codeToCompile, { compilationId });
+    const result = await latexService.compileProject(projectFiles, mainFilePath, { compilationId });
 
     // Actualizar registro en base de datos
     const compilationStatus = result.success ? 'exitosa' : 'error';
@@ -931,7 +1070,7 @@ exports.compileDocument = async (req, res, next) => {
     // Guardar el PDF generado en Supabase Storage (el archivo local sigue siendo la copia rápida)
     if (result.success && result.pdfPath) {
       try {
-        await storageService.uploadPdf(node, result.pdfPath);
+        await storageService.uploadPdf(mainNode, result.pdfPath);
       } catch (err) {
         console.warn('Advertencia al subir el PDF a Storage:', err.message);
       }
@@ -942,15 +1081,7 @@ exports.compileDocument = async (req, res, next) => {
     // Si la compilación falla, verificar si hay un PDF previo válido disponible para el frontend
     let previousPdfUrl = null;
     if (!result.success) {
-      const { data: previousValid } = await supabase
-        .from('compilaciones')
-        .select('id, pdf_output_path')
-        .eq('archivo_principal_id', node.id)
-        .eq('estado', 'exitosa')
-        .not('pdf_output_path', 'is', null)
-        .order('iniciado_en', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const { lastSuccessfulCompilation: previousValid } = await getProjectCompilations(project.id);
 
       if (previousValid && previousValid.pdf_output_path) {
         previousPdfUrl = `/api/documents/${node.id}/pdf`;
@@ -960,6 +1091,7 @@ exports.compileDocument = async (req, res, next) => {
     return res.status(result.success ? 200 : 422).json({
       success: result.success,
       documentId: node.id,
+      mainDocument: { id: mainNode.id, name: mainNode.nombre, path: mainFilePath },
       compilationId,
       pdfUrl,
       previousPdfUrl,
@@ -989,20 +1121,10 @@ exports.getPdf = async (req, res, next) => {
       return res.status(access.status).json({ error: access.error });
     }
 
-    const { node } = access;
+    const { node, project } = access;
 
-    // Buscar la última compilación exitosa
-    const { data: compilation, error: compErr } = await supabase
-      .from('compilaciones')
-      .select('id, pdf_output_path, finalizado_en')
-      .eq('archivo_principal_id', node.id)
-      .eq('estado', 'exitosa')
-      .not('pdf_output_path', 'is', null)
-      .order('iniciado_en', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (compErr) throw compErr;
+    // Buscar la última compilación exitosa del proyecto
+    const { lastSuccessfulCompilation: compilation } = await getProjectCompilations(project.id);
 
     if (!compilation || !compilation.pdf_output_path) {
       return res.status(404).json({
@@ -1013,10 +1135,21 @@ exports.getPdf = async (req, res, next) => {
     const pdfPath = latexService.getCompiledPdfPath(compilation.id);
     const hasLocalPdf = !!pdfPath && fs.existsSync(pdfPath);
 
+    // El PDF lleva el nombre del archivo principal que se compiló (puede no ser el archivo abierto)
+    let mainNode = node;
+    if (compilation.archivo_principal_id && compilation.archivo_principal_id !== node.id) {
+      const { data: compiledNode } = await supabase
+        .from('nodos')
+        .select('id, proyecto_id, nombre')
+        .eq('id', compilation.archivo_principal_id)
+        .maybeSingle();
+      if (compiledNode) mainNode = compiledNode;
+    }
+
     // Si el PDF local ya no existe (otro servidor, disco limpiado), recuperarlo de Supabase Storage
     const storedPdf = hasLocalPdf
       ? null
-      : await storageService.downloadFile(storageService.getPdfPath(node));
+      : await storageService.downloadFile(storageService.getPdfPath(mainNode));
 
     if (!hasLocalPdf && !storedPdf) {
       return res.status(404).json({
@@ -1024,7 +1157,7 @@ exports.getPdf = async (req, res, next) => {
       });
     }
 
-    const baseName = node.nombre.replace(/\.tex$/i, '');
+    const baseName = mainNode.nombre.replace(/\.[^.]+$/, '');
     const disposition = isDownload ? 'attachment' : 'inline';
 
     res.setHeader('Content-Type', 'application/pdf');
@@ -1060,7 +1193,7 @@ exports.getSource = async (req, res, next) => {
     const { node } = access;
 
     if (isDownload) {
-      res.setHeader('Content-Type', 'application/x-tex; charset=utf-8');
+      res.setHeader('Content-Type', getMimeType(node.nombre));
       res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(node.nombre)}"`);
       return res.send(node.contenido_actual || '');
     }
