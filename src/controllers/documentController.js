@@ -4,35 +4,8 @@ const fs = require('fs');
 const supabase = require('../config/supabase');
 const latexService = require('../services/latexService');
 const storageService = require('../services/storageService');
-
-// Plantilla inicial por defecto para nuevos documentos LaTeX
-const DEFAULT_LATEX_TEMPLATE = `\\documentclass{article}
-\\usepackage[utf8]{inputenc}
-\\usepackage[spanish]{babel}
-\\usepackage{amsmath}
-\\usepackage{graphicx}
-
-\\title{Mi Documento}
-\\author{Autor}
-\\date{\\today}
-
-\\begin{document}
-
-\\maketitle
-
-\\section{Introducción}
-¡Bienvenido al editor LaTeX! Puedes comenzar a escribir tu código aquí.
-
-\\end{document}
-`;
-
-/**
- * Validador de formato UUID v4
- */
-function isValidUuid(id) {
-  if (!id || typeof id !== 'string') return false;
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
-}
+const { DEFAULT_LATEX_TEMPLATE } = require('../constants/latexTemplates');
+const { isValidUuid } = require('../utils/validators');
 
 /**
  * Helper para verificar permisos y resolver el nodo y proyecto del usuario
