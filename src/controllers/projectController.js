@@ -1,7 +1,8 @@
-const crypto = require('crypto');
-const supabase = require('../config/supabase');
-const latexService = require('../services/latexService');
+const projectRepository = require('../repositories/projectRepository');
 const storageService = require('../services/storageService');
+const latexService = require('../services/latexService');
+const logger = require('../utils/logger');
+const { createProjectService } = require('../services/projectService');
 const { isTextFile } = require('../utils/fileTypes');
 
 const MAX_NAME_LENGTH = 120;
@@ -152,443 +153,73 @@ async function getMainNodes(projectIds) {
 }
 
 /**
- * Da formato a un proyecto para la respuesta de la API
+ * Controlador HTTP de la HU-17 "Gestión de proyectos".
+ * Solo traduce peticiones HTTP a llamadas del servicio y da forma a la respuesta;
+ * la validación, autorización y persistencia viven en sus propias capas.
+ * Express 5 propaga al middleware de errores cualquier promesa rechazada.
+ *
+ * @param {ReturnType<typeof createProjectService>} projectService
  */
-function formatProject(project, { role, owner, mainNode, lastCompilation } = {}) {
-  const dates = [project.actualizado_en, mainNode?.actualizado_en, project.creado_en].filter(Boolean);
-  const updatedAt = dates.sort((a, b) => new Date(b) - new Date(a))[0] || null;
-
+function createProjectController(projectService) {
   return {
-    id: project.id,
-    name: project.nombre,
-    description: project.descripcion || '',
-    isArchived: !!project.esta_archivado,
-    role: role || 'invitado',
-    ownerId: project.propietario_id,
-    ownerName: owner ? (owner.nombre_completo || owner.correo) : '',
-    documentId: mainNode ? mainNode.id : null,
-    documentName: mainNode ? mainNode.nombre : null,
-    sizeBytes: mainNode ? mainNode.tamano_bytes : 0,
-    createdAt: project.creado_en,
-    updatedAt,
-    lastCompilation: lastCompilation ? {
-      id: lastCompilation.id,
-      status: lastCompilation.estado,
-      startedAt: lastCompilation.iniciado_en,
-      finishedAt: lastCompilation.finalizado_en
-    } : null
+    /** GET /api/projects?archived=true|false */
+    async listProjects(req, res) {
+      const archived = req.query.archived === 'true';
+      const projects = await projectService.listProjects(req.user.id, { archived });
+      res.json({ projects });
+    },
+
+    /** POST /api/projects */
+    async createProject(req, res) {
+      const { project, storageSynced } = await projectService.createProject(req.user.id, req.body);
+      res.status(201).json({ message: 'Proyecto creado exitosamente', project, storageSynced });
+    },
+
+    /** GET /api/projects/:id */
+    async getProjectById(req, res) {
+      const project = await projectService.getProject(req.user.id, req.params.id);
+      res.json({ project });
+    },
+
+    /** PUT /api/projects/:id */
+    async updateProject(req, res) {
+      const project = await projectService.updateProject(req.user.id, req.params.id, req.body);
+      res.json({ message: 'Proyecto actualizado exitosamente', project });
+    },
+
+    /** POST /api/projects/:id/archive */
+    async archiveProject(req, res) {
+      const project = await projectService.setArchived(req.user.id, req.params.id, true);
+      res.json({ message: 'Proyecto archivado exitosamente', project });
+    },
+
+    /** POST /api/projects/:id/restore */
+    async restoreProject(req, res) {
+      const project = await projectService.setArchived(req.user.id, req.params.id, false);
+      res.json({ message: 'Proyecto restaurado exitosamente', project });
+    },
+
+    /** POST /api/projects/:id/duplicate */
+    async duplicateProject(req, res) {
+      const project = await projectService.duplicateProject(req.user.id, req.params.id, req.body);
+      res.status(201).json({ message: 'Proyecto duplicado exitosamente', project });
+    },
+
+    /** DELETE /api/projects/:id */
+    async deleteProject(req, res) {
+      await projectService.deleteProject(req.user.id, req.params.id);
+      res.json({ message: 'Proyecto eliminado exitosamente' });
+    }
   };
 }
 
-/**
- * Elimina de forma permanente un proyecto y todos sus registros dependientes.
- * El esquema no define ON DELETE CASCADE, por lo que se borra en orden de dependencia.
- */
-async function purgeProject(projectId) {
-  const check = ({ error }) => {
-    if (error) throw error;
-  };
-
-  const { data: nodes, error: nodesErr } = await supabase
-    .from('nodos')
-    .select('id')
-    .eq('proyecto_id', projectId);
-
-  if (nodesErr) throw nodesErr;
-
-  const { data: comps, error: compsErr } = await supabase
-    .from('compilaciones')
-    .select('id')
-    .eq('proyecto_id', projectId);
-
-  if (compsErr) throw compsErr;
-
-  check(await supabase.from('compilaciones').delete().eq('proyecto_id', projectId));
-
-  const nodeIds = (nodes || []).map(n => n.id);
-  if (nodeIds.length > 0) {
-    check(await supabase.from('versiones_archivo').delete().in('archivo_id', nodeIds));
-    check(await supabase.from('estados_autoguardado').delete().in('archivo_id', nodeIds));
-    check(await supabase.from('permisos_archivo').delete().in('nodo_id', nodeIds));
-    check(await supabase.from('sesiones_edicion').delete().in('archivo_id', nodeIds));
-    check(await supabase.from('comentarios').delete().in('archivo_id', nodeIds));
-    check(await supabase.from('nodos').delete().eq('proyecto_id', projectId));
-  }
-
-  check(await supabase.from('invitaciones').delete().eq('proyecto_id', projectId));
-  check(await supabase.from('miembros_proyecto').delete().eq('proyecto_id', projectId));
-  // Los registros de auditoría se conservan, solo se desvinculan del proyecto
-  check(await supabase.from('registros_auditoria').update({ proyecto_id: null }).eq('proyecto_id', projectId));
-  check(await supabase.from('proyectos').delete().eq('id', projectId));
-
-  // Limpiar los archivos del proyecto en Supabase Storage
-  try {
-    await storageService.removeProjectFiles(projectId);
-  } catch (err) {
-    console.warn('Advertencia al eliminar archivos de Storage:', err.message);
-  }
-
-  // Limpiar los PDF generados en el almacenamiento local
-  for (const comp of comps || []) {
-    try {
-      await latexService.removeCompiledPdf(comp.id);
-    } catch (err) {
-      console.warn('Advertencia al eliminar PDF compilado:', err.message);
-    }
-  }
-}
-
-/**
- * LISTAR PROYECTOS
- * GET /api/projects?archived=true|false
- */
-exports.listProjects = async (req, res, next) => {
-  try {
-    const userId = req.user.id;
-    const archived = req.query.archived === 'true';
-
-    // 1. Obtener proyectos propios
-    const { data: ownedProjects, error: ownedErr } = await supabase
-      .from('proyectos')
-      .select('*')
-      .eq('propietario_id', userId)
-      .eq('esta_archivado', archived);
-
-    if (ownedErr) throw ownedErr;
-
-    // 2. Obtener proyectos compartidos
-    const { data: sharedMemberships, error: sharedErr } = await supabase
-      .from('miembros_proyecto')
-      .select('proyecto_id, rol, proyectos(*)')
-      .eq('usuario_id', userId);
-
-    if (sharedErr) throw sharedErr;
-
-    const projectMap = new Map();
-    (ownedProjects || []).forEach(p => projectMap.set(p.id, { project: p, role: 'propietario' }));
-    (sharedMemberships || []).forEach(m => {
-      if (m.proyectos && !!m.proyectos.esta_archivado === archived && !projectMap.has(m.proyectos.id)) {
-        projectMap.set(m.proyectos.id, { project: m.proyectos, role: m.rol });
-      }
-    });
-
-    const projectIds = Array.from(projectMap.keys());
-    if (projectIds.length === 0) {
-      return res.json({ projects: [] });
-    }
-
-    // 3. Obtener archivo principal de cada proyecto
-    const mainNodes = await getMainNodes(projectIds);
-
-    // 4. Obtener última compilación de cada proyecto
-    const latestCompilations = new Map();
-    const { data: comps } = await supabase
-      .from('compilaciones')
-      .select('id, proyecto_id, estado, iniciado_en, finalizado_en')
-      .in('proyecto_id', projectIds)
-      .order('iniciado_en', { ascending: false });
-
-    (comps || []).forEach(c => {
-      if (!latestCompilations.has(c.proyecto_id)) {
-        latestCompilations.set(c.proyecto_id, c);
-      }
-    });
-
-    // 5. Obtener nombre de los propietarios
-    const ownerIds = [...new Set(Array.from(projectMap.values()).map(({ project }) => project.propietario_id))];
-    const owners = new Map();
-    const { data: ownerRows } = await supabase
-      .from('usuarios')
-      .select('id, nombre_completo, correo')
-      .in('id', ownerIds);
-
-    (ownerRows || []).forEach(o => owners.set(o.id, o));
-
-    const projects = Array.from(projectMap.values())
-      .map(({ project, role }) => formatProject(project, {
-        role,
-        owner: owners.get(project.propietario_id),
-        mainNode: mainNodes.get(project.id),
-        lastCompilation: latestCompilations.get(project.id)
-      }))
-      .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-
-    return res.json({ projects });
-
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * CREAR PROYECTO
- * POST /api/projects
- */
-exports.createProject = async (req, res, next) => {
-  try {
-    const { name, description, content } = req.body || {};
-    const userId = req.user.id;
-
-    const nameResult = validateName(name);
-    if (nameResult.error) {
-      return res.status(400).json({ error: nameResult.error });
-    }
-
-    const descriptionResult = validateDescription(description);
-    if (descriptionResult.error) {
-      return res.status(400).json({ error: descriptionResult.error });
-    }
-
-    const initialContent = typeof content === 'string' ? content : DEFAULT_LATEX_TEMPLATE;
-
-    // 1. Crear el proyecto
-    const { data: project, error: projError } = await supabase
-      .from('proyectos')
-      .insert({
-        propietario_id: userId,
-        nombre: nameResult.value,
-        descripcion: descriptionResult.value
-      })
-      .select('*')
-      .single();
-
-    if (projError) throw projError;
-
-    let node;
-    try {
-      // 2. Asignar rol de propietario en miembros_proyecto
-      const { error: memberError } = await supabase
-        .from('miembros_proyecto')
-        .insert({
-          proyecto_id: project.id,
-          usuario_id: userId,
-          rol: 'propietario'
-        });
-
-      if (memberError) throw memberError;
-
-      // 3. Crear el archivo principal .tex
-      const { data: newNode, error: nodeError } = await supabase
-        .from('nodos')
-        .insert({
-          proyecto_id: project.id,
-          padre_id: null,
-          nombre: `${nameResult.value}.tex`,
-          tipo_nodo: 'archivo',
-          tipo_archivo: 'tex',
-          contenido_actual: initialContent,
-          tamano_bytes: Buffer.byteLength(initialContent, 'utf8'),
-          creado_por: userId
-        })
-        .select('*')
-        .single();
-
-      if (nodeError) throw nodeError;
-      node = newNode;
-
-      // 4. Guardar snapshot inicial en versiones_archivo
-      const { error: versionError } = await supabase
-        .from('versiones_archivo')
-        .insert({
-          archivo_id: node.id,
-          numero_version: 1,
-          contenido_snapshot: initialContent,
-          modificado_por: userId,
-          resumen_cambio: 'Creación inicial del proyecto'
-        });
-
-      if (versionError) throw versionError;
-
-      // 5. Guardar el archivo .tex en Supabase Storage
-      node.storage_path = await storageService.syncNodeSource(node, initialContent);
-    } catch (innerError) {
-      // Si falla algún paso, deshacer lo creado para no dejar un proyecto incompleto
-      await purgeProject(project.id).catch(() => {});
-      throw innerError;
-    }
-
-    return res.status(201).json({
-      message: 'Proyecto creado exitosamente',
-      project: formatProject(project, { role: 'propietario', mainNode: node }),
-      storageSynced: !!node.storage_path
-    });
-
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * OBTENER PROYECTO POR ID
- * GET /api/projects/:id
- */
-exports.getProjectById = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user.id;
-
-    const access = await resolveProjectAndAccess(id, userId);
-    if (access.error) {
-      return res.status(access.status).json({ error: access.error });
-    }
-
-    const { project, role } = access;
-
-    const mainNodes = await getMainNodes([project.id]);
-
-    const { data: owner } = await supabase
-      .from('usuarios')
-      .select('id, nombre_completo, correo')
-      .eq('id', project.propietario_id)
-      .maybeSingle();
-
-    const { data: lastCompilation } = await supabase
-      .from('compilaciones')
-      .select('id, estado, iniciado_en, finalizado_en')
-      .eq('proyecto_id', project.id)
-      .order('iniciado_en', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    return res.json({
-      project: formatProject(project, {
-        role,
-        owner,
-        mainNode: mainNodes.get(project.id),
-        lastCompilation
-      })
-    });
-
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * MODIFICAR PROYECTO (renombrar o cambiar descripción)
- * PUT /api/projects/:id
- */
-exports.updateProject = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const { name, description } = req.body || {};
-    const userId = req.user.id;
-
-    const access = await resolveProjectAndAccess(id, userId);
-    if (access.error) {
-      return res.status(access.status).json({ error: access.error });
-    }
-
-    const { project, role } = access;
-
-    if (role !== 'propietario') {
-      return res.status(403).json({ error: 'Solo el propietario puede modificar este proyecto' });
-    }
-
-    if (name === undefined && description === undefined) {
-      return res.status(400).json({ error: 'No se enviaron datos para modificar' });
-    }
-
-    const updates = {
-      actualizado_en: new Date().toISOString()
-    };
-
-    if (name !== undefined) {
-      const nameResult = validateName(name);
-      if (nameResult.error) {
-        return res.status(400).json({ error: nameResult.error });
-      }
-      updates.nombre = nameResult.value;
-    }
-
-    if (description !== undefined) {
-      const descriptionResult = validateDescription(description);
-      if (descriptionResult.error) {
-        return res.status(400).json({ error: descriptionResult.error });
-      }
-      updates.descripcion = descriptionResult.value;
-    }
-
-    const { data: updatedProject, error: updateError } = await supabase
-      .from('proyectos')
-      .update(updates)
-      .eq('id', project.id)
-      .select('*')
-      .single();
-
-    if (updateError) throw updateError;
-
-    // Si el archivo principal llevaba el nombre del proyecto, renombrarlo también
-    const mainNodes = await getMainNodes([project.id]);
-    let mainNode = mainNodes.get(project.id);
-
-    if (mainNode && updates.nombre && updates.nombre !== project.nombre && mainNode.nombre === `${project.nombre}.tex`) {
-      const { data: renamedNode, error: renameError } = await supabase
-        .from('nodos')
-        .update({ nombre: `${updates.nombre}.tex` })
-        .eq('id', mainNode.id)
-        .select('*')
-        .single();
-
-      if (renameError) throw renameError;
-      mainNode = renamedNode;
-
-      // Reflejar el nuevo nombre también en los archivos de Supabase Storage
-      await storageService.syncNodeSource(renamedNode, renamedNode.contenido_actual);
-    }
-
-    return res.json({
-      message: 'Proyecto actualizado exitosamente',
-      project: formatProject(updatedProject, { role, mainNode })
-    });
-
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * Cambia el estado de archivado de un proyecto (solo propietario)
- */
-async function setArchived(req, res, next, archived) {
-  try {
-    const { id } = req.params;
-    const userId = req.user.id;
-
-    const access = await resolveProjectAndAccess(id, userId);
-    if (access.error) {
-      return res.status(access.status).json({ error: access.error });
-    }
-
-    const { project, role } = access;
-
-    if (role !== 'propietario') {
-      return res.status(403).json({
-        error: `Solo el propietario puede ${archived ? 'archivar' : 'restaurar'} este proyecto`
-      });
-    }
-
-    const { data: updatedProject, error: updateError } = await supabase
-      .from('proyectos')
-      .update({ esta_archivado: archived, actualizado_en: new Date().toISOString() })
-      .eq('id', project.id)
-      .select('*')
-      .single();
-
-    if (updateError) throw updateError;
-
-    const mainNodes = await getMainNodes([project.id]);
-
-    return res.json({
-      message: archived ? 'Proyecto archivado exitosamente' : 'Proyecto restaurado exitosamente',
-      project: formatProject(updatedProject, { role, mainNode: mainNodes.get(project.id) })
-    });
-
-  } catch (error) {
-    next(error);
-  }
-}
-
+// Raíz de composición: aquí se conectan las implementaciones concretas
+const projectService = createProjectService({
+  repository: projectRepository,
+  storage: storageService,
+  compiledFiles: latexService,
+  logger
+});
 /**
  * ARCHIVAR PROYECTO
  * POST /api/projects/:id/archive
@@ -789,7 +420,5 @@ exports.deleteProject = async (req, res, next) => {
       message: 'Proyecto eliminado exitosamente'
     });
 
-  } catch (error) {
-    next(error);
-  }
-};
+module.exports = createProjectController(projectService);
+module.exports.createProjectController = createProjectController;

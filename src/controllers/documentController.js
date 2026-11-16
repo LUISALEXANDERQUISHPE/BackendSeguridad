@@ -4,6 +4,8 @@ const fs = require('fs');
 const supabase = require('../config/supabase');
 const latexService = require('../services/latexService');
 const storageService = require('../services/storageService');
+const { DEFAULT_LATEX_TEMPLATE } = require('../constants/latexTemplates');
+const { isValidUuid } = require('../utils/validators');
 const { getFileType, getMimeType, isTextFile, isValidNodeName } = require('../utils/fileTypes');
 
 // Plantilla inicial por defecto para nuevos documentos LaTeX
