@@ -61,6 +61,13 @@ router.post('/', documentController.createDocument);
  */
 router.get('/', documentController.listDocuments);
 
+router.get('/project/:projectId/tree', documentController.listProjectTree);
+router.post('/project/:projectId/nodes', documentController.createProjectNode);
+router.patch('/project/:projectId/nodes/:nodeId', documentController.updateProjectNode);
+router.patch('/project/:projectId/nodes/:nodeId/move', documentController.moveProjectNode);
+router.delete('/project/:projectId/nodes/:nodeId', documentController.deleteProjectNode);
+router.get('/project/:projectId/nodes/:nodeId/download', documentController.downloadProjectNode);
+
 /**
  * @swagger
  * /api/documents/{id}:
@@ -317,4 +324,3 @@ router.get('/:id/pdf', documentController.getPdf);
 router.get('/:id/source', documentController.getSource);
 
 module.exports = router;
-
