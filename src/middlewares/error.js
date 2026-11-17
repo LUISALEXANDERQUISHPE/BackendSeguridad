@@ -3,6 +3,17 @@ const logger = require('../utils/logger');
 
 const INTERNAL_ERROR_MESSAGE = 'Error interno del servidor';
 const HTTP_INTERNAL_ERROR = 500;
+const MIN_ERROR_STATUS = 400;
+const MAX_ERROR_STATUS = 599;
+
+/**
+ * Código HTTP válido para la respuesta. Supabase devuelve statusCode como texto (ej. "404")
+ * y Express exige un entero entre 400 y 599.
+ */
+function resolveStatusCode(err) {
+  const parsed = Number.parseInt(err.statusCode ?? err.status, 10);
+  return parsed >= MIN_ERROR_STATUS && parsed <= MAX_ERROR_STATUS ? parsed : HTTP_INTERNAL_ERROR;
+}
 
 /**
  * Middleware global para capturar errores de la aplicación.
@@ -12,7 +23,7 @@ const HTTP_INTERNAL_ERROR = 500;
  */
 module.exports = (err, req, res, _next) => {
   const isDevelopment = config.nodeEnv === 'development';
-  const statusCode = err.statusCode || HTTP_INTERNAL_ERROR;
+  const statusCode = resolveStatusCode(err);
   const isInternal = statusCode >= HTTP_INTERNAL_ERROR && !err.isOperational;
 
   if (isInternal) {
@@ -22,10 +33,6 @@ module.exports = (err, req, res, _next) => {
   const message = isInternal && !isDevelopment
     ? INTERNAL_ERROR_MESSAGE
     : err.message || INTERNAL_ERROR_MESSAGE;
-  // Supabase devuelve statusCode como texto (ej. "404"); Express exige un entero válido
-  const parsedStatus = Number.parseInt(err.statusCode ?? err.status, 10);
-  const statusCode = parsedStatus >= 400 && parsedStatus <= 599 ? parsedStatus : 500;
-  const message = err.message || 'Error interno del servidor';
 
   res.status(statusCode).json({
     error: {
