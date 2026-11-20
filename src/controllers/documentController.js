@@ -8,6 +8,7 @@ const { getFileType, getMimeType, isTextFile, isValidNodeName } = require('../ut
 
 const { DEFAULT_LATEX_TEMPLATE } = require('../constants/latexTemplates');
 const { isValidUuid } = require('../utils/validators');
+const { sendFile } = require('../utils/httpFile');
 
 async function resolveProjectAccess(projectId, userId) {
   if (!isValidUuid(projectId)) return { error: 'Identificador de proyecto inválido', status: 400 };
@@ -629,9 +630,12 @@ exports.downloadProjectNode = async (req, res, next) => {
     const buffer = node.storage_path ? await storageService.downloadFile(node.storage_path) : Buffer.from(node.contenido_actual || '', 'utf8');
     if (!buffer) return res.status(404).json({ error: 'El archivo no está disponible' });
     const disposition = req.query.inline === 'true' ? 'inline' : 'attachment';
-    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(node.nombre)}"`);
-    res.setHeader('Content-Type', getMimeType(node.nombre));
-    return res.send(buffer);
+    return await sendFile(res, {
+      fileName: node.nombre,
+      contentType: getMimeType(node.nombre),
+      disposition,
+      buffer
+    });
   } catch (error) {
     next(error);
   }
@@ -1132,17 +1136,14 @@ exports.getPdf = async (req, res, next) => {
     }
 
     const baseName = mainNode.nombre.replace(/\.[^.]+$/, '');
-    const disposition = isDownload ? 'attachment' : 'inline';
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(baseName)}.pdf"`);
-
-    if (storedPdf) {
-      return res.send(storedPdf);
-    }
-
-    const readStream = fs.createReadStream(pdfPath);
-    readStream.pipe(res);
+    return await sendFile(res, {
+      fileName: `${baseName}.pdf`,
+      contentType: 'application/pdf',
+      disposition: isDownload ? 'attachment' : 'inline',
+      buffer: storedPdf,
+      filePath: pdfPath
+    });
 
   } catch (error) {
     next(error);
@@ -1167,9 +1168,12 @@ exports.getSource = async (req, res, next) => {
     const { node } = access;
 
     if (isDownload) {
-      res.setHeader('Content-Type', getMimeType(node.nombre));
-      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(node.nombre)}"`);
-      return res.send(node.contenido_actual || '');
+      return await sendFile(res, {
+        fileName: node.nombre,
+        contentType: getMimeType(node.nombre),
+        disposition: 'attachment',
+        buffer: Buffer.from(node.contenido_actual || '', 'utf8')
+      });
     }
 
     return res.json({

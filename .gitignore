@@ -32,3 +32,6 @@ storage/
 *.out
 *.synctex.gz
 
+
+# Reportes de cobertura de pruebas
+coverage/

@@ -21,7 +21,14 @@ function resolveStatusCode(err) {
  * los inesperados no exponen detalles internos fuera del ambiente de desarrollo.
  * Express identifica a los manejadores de errores por sus 4 parámetros.
  */
-module.exports = (err, req, res, _next) => {
+module.exports = (err, req, res, next) => {
+  // Si la respuesta ya empezó (ej. un PDF a medio enviar) no se puede responder con JSON:
+  // Express cierra la conexión y el cliente detecta la descarga incompleta
+  if (res.headersSent) {
+    logger.error(err.stack || err);
+    return next(err);
+  }
+
   const isDevelopment = config.nodeEnv === 'development';
   const statusCode = resolveStatusCode(err);
   const isInternal = statusCode >= HTTP_INTERNAL_ERROR && !err.isOperational;
@@ -34,7 +41,7 @@ module.exports = (err, req, res, _next) => {
     ? INTERNAL_ERROR_MESSAGE
     : err.message || INTERNAL_ERROR_MESSAGE;
 
-  res.status(statusCode).json({
+  return res.status(statusCode).json({
     error: {
       message,
       status: statusCode,
