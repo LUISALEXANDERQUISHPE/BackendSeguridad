@@ -14,7 +14,8 @@ const {
   buildClonedNodes,
   buildInitialVersions,
   isMainTexNode,
-  resolveBinaryFileName
+  hasTextContent,
+  buildRelativePath
 } = require('./projectCloneBuilder');
 const { createProjectAccessService } = require('./projectAccessService');
 
@@ -240,34 +241,41 @@ function createProjectService({ repository, storage, compiledFiles, logger }) {
   }
 
   /**
-   * Copia en Storage un archivo binario (imágenes, etc.) del proyecto original.
+   * Copia en Storage un archivo de la copia en la misma ruta de carpetas que el original:
+   * los de texto se vuelven a subir y los binarios (imágenes, PDFs...) se copian dentro del bucket.
+   * @returns {Promise<boolean>} true si el archivo quedó en Storage
    */
-  async function copyBinaryFile(sourceNode, clonedNode, targetProjectId) {
-    const fileName = resolveBinaryFileName(clonedNode.nombre, sourceNode.storage_path);
-    const copyPath = await storage.copyFile(
-      sourceNode.storage_path,
-      storage.getFilePath(targetProjectId, fileName)
-    );
-    await repository.updateNode(clonedNode.id, { storage_path: copyPath });
+  async function copyFileToStorage(sourceNode, targetPath) {
+    if (hasTextContent(sourceNode)) {
+      await storage.uploadSource(targetPath, sourceNode.contenido_actual);
+      return true;
+    }
+    if (sourceNode.storage_path) {
+      await storage.copyFile(sourceNode.storage_path, targetPath);
+      return true;
+    }
+    return false;
   }
 
   /**
-   * Guarda en Storage los archivos de la copia (texto se vuelve a subir, binarios se copian).
+   * Guarda en Storage todos los archivos de la copia, conservando la estructura de carpetas.
    */
   async function copyFilesToStorage(sourceNodes, clonedNodes, idMap, targetProjectId) {
     const clonedById = new Map(clonedNodes.map(node => [node.id, node]));
+    const sourceById = new Map(sourceNodes.map(node => [node.id, node]));
+    const sourceFiles = sourceNodes.filter(node => node.tipo_nodo === NODE_TYPES.FILE);
 
-    for (const sourceNode of sourceNodes) {
+    for (const sourceNode of sourceFiles) {
       const clonedNode = clonedById.get(idMap.get(sourceNode.id));
-      const isFile = sourceNode.tipo_nodo === NODE_TYPES.FILE;
+      // La ruta usa el nombre de la copia (el archivo principal puede haberse renombrado)
+      const relativePath = buildRelativePath({ ...sourceNode, nombre: clonedNode.nombre }, sourceById);
+      const targetPath = storage.getNestedFilePath(targetProjectId, relativePath);
 
-      if (isFile && typeof sourceNode.contenido_actual === 'string') {
-        await storage.syncNodeSource(clonedNode, sourceNode.contenido_actual);
-      } else if (isFile && sourceNode.storage_path) {
-        await runSafely('copiar archivo en Storage', () =>
-          copyBinaryFile(sourceNode, clonedNode, targetProjectId)
-        );
-      }
+      await runSafely('copiar archivo en Storage', async () => {
+        if (await copyFileToStorage(sourceNode, targetPath)) {
+          await repository.updateNode(clonedNode.id, { storage_path: targetPath });
+        }
+      });
     }
   }
 

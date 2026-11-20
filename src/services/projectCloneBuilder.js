@@ -1,6 +1,9 @@
 const nodeCrypto = require('node:crypto');
 const { NODE_TYPES, FILE_TYPES } = require('../constants/projectConstants');
 const { toMainFileName } = require('../validators/projectValidator');
+const { isTextFile: isTextFileName } = require('../utils/fileTypes');
+
+const MAX_FOLDER_DEPTH = 64;
 
 /**
  * Funciones puras para construir la copia de un proyecto.
@@ -16,11 +19,21 @@ function isMainTexNode(node) {
 }
 
 /**
+ * Archivo editable como texto (.tex, .bib, .txt...) según su extensión.
+ * Los binarios (imágenes, PDFs...) no guardan contenido en la base de datos, solo en Storage.
  * @param {object} node
  * @returns {boolean}
  */
-function isTextFile(node) {
-  return node.tipo_nodo === NODE_TYPES.FILE && typeof node.contenido_actual === 'string';
+function isTextNode(node) {
+  return node.tipo_nodo === NODE_TYPES.FILE && isTextFileName(node.nombre);
+}
+
+/**
+ * @param {object} node
+ * @returns {boolean}
+ */
+function hasTextContent(node) {
+  return isTextNode(node) && typeof node.contenido_actual === 'string';
 }
 
 /**
@@ -57,7 +70,7 @@ function buildClonedNodes({ sourceNodes, idMap, sourceProject, targetProject, us
       nombre: keepsProjectName ? toMainFileName(targetProject.nombre) : node.nombre,
       tipo_nodo: node.tipo_nodo,
       tipo_archivo: node.tipo_archivo,
-      contenido_actual: node.contenido_actual,
+      contenido_actual: isTextNode(node) ? node.contenido_actual : null,
       // Cada copia tendrá su propio archivo en Storage (se asigna después de insertar)
       storage_path: null,
       tamano_bytes: node.tamano_bytes,
@@ -74,7 +87,7 @@ function buildClonedNodes({ sourceNodes, idMap, sourceProject, targetProject, us
  * @returns {object[]}
  */
 function buildInitialVersions(clonedNodes, userId, summary) {
-  return clonedNodes.filter(isTextFile).map(node => ({
+  return clonedNodes.filter(hasTextContent).map(node => ({
     archivo_id: node.id,
     numero_version: 1,
     contenido_snapshot: node.contenido_actual,
@@ -84,22 +97,27 @@ function buildInitialVersions(clonedNodes, userId, summary) {
 }
 
 /**
- * Nombre con extensión para el archivo binario copiado en Storage.
- * @param {string} nodeName
- * @param {string} sourceStoragePath
+ * Ruta relativa de un nodo dentro del proyecto (ej. "capitulos/intro.tex"), recorriendo sus carpetas.
+ * @param {object} node
+ * @param {Map<string, object>} nodesById
  * @returns {string}
  */
-function resolveBinaryFileName(nodeName, sourceStoragePath) {
-  if (nodeName.includes('.')) return nodeName;
-  const extension = sourceStoragePath.includes('.') ? sourceStoragePath.split('.').pop() : 'bin';
-  return `${nodeName}.${extension}`;
+function buildRelativePath(node, nodesById) {
+  const parts = [];
+  let current = node;
+  while (current && parts.length < MAX_FOLDER_DEPTH) {
+    parts.unshift(current.nombre);
+    current = current.padre_id ? nodesById.get(current.padre_id) : null;
+  }
+  return parts.join('/');
 }
 
 module.exports = {
   isMainTexNode,
-  isTextFile,
+  isTextNode,
+  hasTextContent,
   buildIdMap,
   buildClonedNodes,
   buildInitialVersions,
-  resolveBinaryFileName
+  buildRelativePath
 };
