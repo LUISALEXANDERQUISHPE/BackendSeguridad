@@ -9,6 +9,8 @@ const { getFileType, getMimeType, isTextFile, isValidNodeName } = require('../ut
 const { DEFAULT_LATEX_TEMPLATE } = require('../constants/latexTemplates');
 const { isValidUuid } = require('../utils/validators');
 const { sendFile } = require('../utils/httpFile');
+const { versionService } = require('../container');
+const { VERSION_LIMITS } = require('../constants/versionConstants');
 
 async function resolveProjectAccess(projectId, userId) {
   if (!isValidUuid(projectId)) return { error: 'Identificador de proyecto inválido', status: 400 };
@@ -889,26 +891,14 @@ exports.updateDocument = async (req, res, next) => {
             });
         }
       } else {
-        // Guardado manual (Ctrl+S explícito o botón Guardar): crear snapshot en versiones_archivo
-        const { data: lastVersion } = await supabase
-          .from('versiones_archivo')
-          .select('numero_version')
-          .eq('archivo_id', node.id)
-          .order('numero_version', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        const nextVersion = (lastVersion?.numero_version || 0) + 1;
-
-        await supabase
-          .from('versiones_archivo')
-          .insert({
-            archivo_id: node.id,
-            numero_version: nextVersion,
-            contenido_snapshot: content,
-            modificado_por: userId,
-            resumen_cambio: summary || `Versión ${nextVersion} (guardado manual)`
-          });
+        // Guardado manual (Ctrl+S o botón Guardar): registrar la versión en el historial (HU-23).
+        // El servicio evita versiones duplicadas y resuelve guardados simultáneos.
+        await versionService.recordVersion({
+          fileId: node.id,
+          userId,
+          content,
+          summary: typeof summary === 'string' ? summary.trim().slice(0, VERSION_LIMITS.MAX_SUMMARY_LENGTH) : null
+        });
       }
     }
 

@@ -2,9 +2,13 @@ const express = require('express');
 const router = express.Router();
 const documentController = require('../controllers/documentController');
 const authMiddleware = require('../middlewares/auth');
+const versionRoutes = require('./versionRoutes');
 
 // Todas las rutas de documentos requieren autenticación JWT
 router.use(authMiddleware);
+
+// Historial de versiones de cada archivo (HU-23)
+router.use('/:id/versions', versionRoutes);
 
 /**
  * @swagger
