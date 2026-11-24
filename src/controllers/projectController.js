@@ -2,6 +2,7 @@ const projectRepository = require('../repositories/projectRepository');
 const storageService = require('../services/storageService');
 const latexService = require('../services/latexService');
 const logger = require('../utils/logger');
+const userNotifier = require('../realtime/userNotifier');
 const { createProjectService } = require('../services/projectService');
 
 /**
@@ -57,6 +58,18 @@ function createProjectController(projectService) {
       res.status(201).json({ message: 'Proyecto duplicado exitosamente', project });
     },
 
+    /** GET /api/projects/:id/members */
+    async listMembers(req, res) {
+      const members = await projectService.listMembers(req.user.id, req.params.id);
+      res.json({ members });
+    },
+
+    /** POST /api/projects/:id/members */
+    async shareProject(req, res) {
+      const member = await projectService.shareProject(req.user.id, req.params.id, req.body);
+      res.status(201).json({ message: 'Proyecto compartido exitosamente', member });
+    },
+
     /** DELETE /api/projects/:id */
     async deleteProject(req, res) {
       await projectService.deleteProject(req.user.id, req.params.id);
@@ -70,7 +83,8 @@ const projectService = createProjectService({
   repository: projectRepository,
   storage: storageService,
   compiledFiles: latexService,
-  logger
+  logger,
+  notifier: userNotifier
 });
 
 module.exports = createProjectController(projectService);

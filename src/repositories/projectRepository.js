@@ -16,6 +16,11 @@ function unwrap({ data, error }) {
   return data;
 }
 
+/** Escapa los comodines de LIKE (%, _ y \) para buscar el texto tal cual. */
+function escapeLikePattern(text) {
+  return text.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
 /**
  * Agrupa filas por proyecto conservando la primera que aparece (según el orden de la consulta).
  * @param {Array<{ proyecto_id: string }>} rows
@@ -85,12 +90,34 @@ function createProjectRepository(db) {
       );
     },
 
-    async addMember(projectId, userId, role) {
+    async findUserById(userId) {
+      return unwrap(await db.from('usuarios').select(OWNER_COLUMNS).eq('id', userId).maybeSingle());
+    },
+
+    async findUserByEmail(email) {
+      // ilike ignora mayúsculas; se escapan sus comodines para que la búsqueda sea exacta
+      return unwrap(
+        await db.from('usuarios').select(OWNER_COLUMNS).ilike('correo', escapeLikePattern(email)).maybeSingle()
+      );
+    },
+
+    /** Colaboradores del proyecto con su perfil (sin el propietario, que vive en proyectos). */
+    async findMembers(projectId) {
+      return unwrap(
+        await db
+          .from('miembros_proyecto')
+          .select('usuario_id, rol, se_unio_en, usuarios!miembros_proyecto_usuario_id_fkey(nombre_completo, correo)')
+          .eq('proyecto_id', projectId)
+      ) || [];
+    },
+
+    async addMember(projectId, userId, role, invitedBy = null) {
       unwrap(
         await db.from('miembros_proyecto').insert({
           proyecto_id: projectId,
           usuario_id: userId,
-          rol: role
+          rol: role,
+          invitado_por: invitedBy
         })
       );
     },

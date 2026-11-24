@@ -240,4 +240,66 @@ router.post('/:id/archive', projectController.archiveProject);
  */
 router.post('/:id/restore', projectController.restoreProject);
 
+/**
+ * @swagger
+ * /api/projects/{id}/members:
+ *   get:
+ *     summary: Listar los colaboradores del proyecto
+ *     tags: [Proyectos]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Colaboradores del proyecto (sin el propietario)
+ *       403:
+ *         description: No tienes acceso al proyecto
+ */
+router.get('/:id/members', projectController.listMembers);
+
+/**
+ * @swagger
+ * /api/projects/{id}/members:
+ *   post:
+ *     summary: Compartir el proyecto con otro usuario registrado (entra como editor)
+ *     tags: [Proyectos]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: colaborador@correo.com
+ *     responses:
+ *       201:
+ *         description: Proyecto compartido exitosamente
+ *       403:
+ *         description: Solo el propietario puede compartirlo
+ *       404:
+ *         description: No existe un usuario con ese correo
+ *       409:
+ *         description: El usuario ya colabora en el proyecto
+ */
+router.post('/:id/members', projectController.shareProject);
+
 module.exports = router;

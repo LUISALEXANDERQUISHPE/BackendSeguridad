@@ -8,6 +8,7 @@ const { isValidUuid } = require('../utils/validators');
 const { isTextFile } = require('../utils/fileTypes');
 const { PROJECT_LIMITS, PROJECT_ROLES } = require('../constants/projectConstants');
 const { CollabRoom } = require('./collabRoom');
+const userNotifier = require('./userNotifier');
 
 const COLLAB_PATH = '/api/collab';
 // Tiempo máximo para que el cliente se identifique después de conectarse
@@ -164,8 +165,9 @@ function createRoomRegistry() {
 /**
  * Habilita la edición colaborativa en tiempo real sobre el servidor HTTP existente.
  *
- * Protocolo (mensajes JSON):
- *  - Cliente -> servidor: { type: 'join', documentId, token } (primer mensaje obligatorio),
+ * Protocolo (mensajes JSON). El primer mensaje decide el tipo de conexión:
+ *  - { type: 'subscribe', token }: avisos del usuario (ej. 'project-shared' al compartirle un proyecto).
+ *  - Cliente -> servidor: { type: 'join', documentId, token } para editar un archivo,
  *    { type: 'update', update } (cambio Yjs en base64), { type: 'cursor', cursor }.
  *  - Servidor -> cliente: init, update, presence, cursor, saved, save-error, error.
  *
@@ -191,9 +193,10 @@ function attachCollabServer(httpServer) {
 
     let room = null;
     let joining = false;
+    let subscribedUserId = null;
 
     const joinTimer = setTimeout(() => {
-      if (!room) socket.close(CLOSE_CODES.TIMEOUT, 'Tiempo de espera agotado');
+      if (!room && !subscribedUserId) socket.close(CLOSE_CODES.TIMEOUT, 'Tiempo de espera agotado');
     }, JOIN_TIMEOUT_MS);
 
     socket.on('message', async (raw, isBinary) => {
@@ -206,6 +209,9 @@ function attachCollabServer(httpServer) {
         return;
       }
 
+      // Conexión de notificaciones: el cliente no envía nada más después de suscribirse
+      if (subscribedUserId) return;
+
       if (room) {
         try {
           room.handleMessage(socket, message);
@@ -217,13 +223,22 @@ function attachCollabServer(httpServer) {
       }
 
       if (joining) return;
-      if (message?.type !== 'join') {
-        socket.close(CLOSE_CODES.INVALID_MESSAGE, 'Se esperaba el mensaje join');
+      if (message?.type !== 'join' && message?.type !== 'subscribe') {
+        socket.close(CLOSE_CODES.INVALID_MESSAGE, 'Se esperaba el mensaje join o subscribe');
         return;
       }
 
       joining = true;
       try {
+        if (message.type === 'subscribe') {
+          const user = await authenticate(message.token);
+          if (socket.readyState !== socket.OPEN) return;
+          clearTimeout(joinTimer);
+          subscribedUserId = user.id;
+          userNotifier.subscribe(user.id, socket);
+          socket.send(JSON.stringify({ type: 'subscribed' }));
+          return;
+        }
 
         const { user, node, role } = await authorize(message.token, message.documentId);
         const name = await resolveDisplayName(user);
@@ -251,7 +266,9 @@ function attachCollabServer(httpServer) {
     socket.on('close', () => {
       clearTimeout(joinTimer);
       if (room) registry.release(room, socket);
+      if (subscribedUserId) userNotifier.unsubscribe(subscribedUserId, socket);
       room = null;
+      subscribedUserId = null;
     });
 
     socket.on('error', (error) => logger.warn('[collab] Error de conexión:', error.message));
