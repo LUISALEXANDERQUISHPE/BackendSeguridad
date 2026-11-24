@@ -86,3 +86,10 @@ Al duplicar un proyecto se crean archivos propios para la copia y al eliminarlo 
 Los puntos reservados para cifrado están en `src/utils/crypto.js`: `encrypt(data)` debe invocarse antes de guardar un campo sensible de aplicación y `decrypt(data)` después de leerlo. No cifres contraseñas: Supabase Auth las almacena y verifica de forma segura.
 
 
+
+### Colaboración en tiempo real (`ws://localhost:5000/api/collab`)
+Varias personas pueden editar el mismo archivo a la vez, como en Overleaf. El servidor WebSocket comparte el puerto del API y usa [Yjs](https://yjs.dev) (CRDT) para fusionar las ediciones simultáneas sin conflictos.
+
+- **Acceso**: el primer mensaje debe ser `{ "type": "join", "documentId": "<uuid del archivo>", "token": "<token de Supabase>" }`. El token no va en la URL para que no quede en registros. Solo entran el propietario y los miembros del proyecto, y solo se aceptan conexiones desde `CORS_ORIGIN`. Los roles `revisor` e `invitado` reciben los cambios pero no pueden editar.
+- **Guardado**: el servidor guarda el contenido en `nodos.contenido_actual` y en Storage 2 s después del último cambio y cuando sale el último colaborador. `Ctrl+S` sigue creando una versión en el historial.
+- **Presencia**: cada colaborador ve los avatares de quienes están conectados y sus cursores y selecciones de colores.
