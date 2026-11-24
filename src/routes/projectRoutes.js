@@ -302,4 +302,34 @@ router.get('/:id/members', projectController.listMembers);
  */
 router.post('/:id/members', projectController.shareProject);
 
+/**
+ * @swagger
+ * /api/projects/{id}/share-suggestions:
+ *   get:
+ *     summary: Sugerir usuarios registrados cuyo correo empieza con el texto escrito (solo el propietario)
+ *     tags: [Proyectos]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: query
+ *         name: q
+ *         required: true
+ *         schema:
+ *           type: string
+ *           minLength: 3
+ *         description: Inicio del correo (mínimo 3 caracteres)
+ *     responses:
+ *       200:
+ *         description: Hasta 5 usuarios que aún no tienen acceso al proyecto
+ *       403:
+ *         description: Solo el propietario puede compartir el proyecto
+ */
+router.get('/:id/share-suggestions', projectController.suggestUsers);
+
 module.exports = router;

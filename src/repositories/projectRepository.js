@@ -101,6 +101,25 @@ function createProjectRepository(db) {
       );
     },
 
+    /**
+     * Usuarios activos cuyo correo empieza con el texto indicado (autocompletado al compartir).
+     * @param {string} prefix
+     * @param {{ excludeIds?: string[], limit?: number }} options
+     */
+    async searchUsersByEmailPrefix(prefix, { excludeIds = [], limit = 5 } = {}) {
+      let query = db
+        .from('usuarios')
+        .select(OWNER_COLUMNS)
+        .ilike('correo', `${escapeLikePattern(prefix)}%`)
+        .eq('esta_activo', true)
+        .order('correo', { ascending: true })
+        .limit(limit);
+      if (excludeIds.length > 0) {
+        query = query.not('id', 'in', `(${excludeIds.join(',')})`);
+      }
+      return unwrap(await query) || [];
+    },
+
     /** Colaboradores del proyecto con su perfil (sin el propietario, que vive en proyectos). */
     async findMembers(projectId) {
       return unwrap(

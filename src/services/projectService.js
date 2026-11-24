@@ -21,6 +21,13 @@ const {
 } = require('./projectCloneBuilder');
 const { createProjectAccessService } = require('./projectAccessService');
 
+// Autocompletado de correos al compartir: límites que dificultan enumerar usuarios
+const SHARE_SUGGESTIONS = Object.freeze({
+  MIN_QUERY_LENGTH: 3,
+  MAX_QUERY_LENGTH: 254,
+  MAX_RESULTS: 5
+});
+
 /**
  * Servicio de negocio de la HU-17 "Gestión de proyectos":
  * crear, abrir, modificar, archivar/restaurar, duplicar y eliminar proyectos LaTeX.
@@ -346,6 +353,27 @@ function createProjectService({ repository, storage, compiledFiles, logger, noti
   }
 
   /**
+   * SUGERIR usuarios para compartir mientras se escribe el correo (solo el propietario).
+   * Para no exponer la lista de usuarios del sistema: exige un mínimo de caracteres, solo busca
+   * correos que empiecen con lo escrito, devuelve pocos resultados y omite a quienes ya tienen acceso.
+   */
+  async function suggestUsers(userId, projectId, query) {
+    const { project } = await access.resolveAsOwner(projectId, userId, 'compartir');
+    const prefix = typeof query === 'string' ? query.trim().toLowerCase() : '';
+    if (prefix.length < SHARE_SUGGESTIONS.MIN_QUERY_LENGTH || prefix.length > SHARE_SUGGESTIONS.MAX_QUERY_LENGTH) {
+      return [];
+    }
+
+    const members = await repository.findMembers(project.id);
+    const excludeIds = [project.propietario_id, ...members.map((member) => member.usuario_id)];
+    const users = await repository.searchUsersByEmailPrefix(prefix, {
+      excludeIds,
+      limit: SHARE_SUGGESTIONS.MAX_RESULTS
+    });
+    return users.map((user) => ({ name: user.nombre_completo || null, email: user.correo }));
+  }
+
+  /**
    * COMPARTIR el proyecto con otro usuario registrado (solo el propietario).
    * Por ahora todos los colaboradores entran como editores: la gestión de roles se hará aparte.
    */
@@ -388,6 +416,7 @@ function createProjectService({ repository, storage, compiledFiles, logger, noti
     duplicateProject,
     deleteProject,
     listMembers,
+    suggestUsers,
     shareProject
   };
 }

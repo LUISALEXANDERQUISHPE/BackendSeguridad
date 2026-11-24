@@ -64,6 +64,12 @@ function createProjectController(projectService) {
       res.json({ members });
     },
 
+    /** GET /api/projects/:id/share-suggestions?q=texto */
+    async suggestUsers(req, res) {
+      const users = await projectService.suggestUsers(req.user.id, req.params.id, req.query.q);
+      res.json({ users });
+    },
+
     /** POST /api/projects/:id/members */
     async shareProject(req, res) {
       const member = await projectService.shareProject(req.user.id, req.params.id, req.body);
