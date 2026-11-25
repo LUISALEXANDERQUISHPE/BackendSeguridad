@@ -3,6 +3,7 @@ const router = express.Router();
 const authRoutes = require('./authRoutes');
 const documentRoutes = require('./documentRoutes');
 const projectRoutes = require('./projectRoutes');
+const invitationRoutes = require('./invitationRoutes');
 
 // Rutas de autenticación
 router.use('/auth', authRoutes);
@@ -12,6 +13,9 @@ router.use('/documents', documentRoutes);
 
 // Rutas de gestión de proyectos
 router.use('/projects', projectRoutes);
+
+// HU-25: invitaciones recibidas por el usuario
+router.use('/invitations', invitationRoutes);
 
 /**
  * @swagger

@@ -3,6 +3,10 @@ const versionRepository = require('./repositories/versionRepository');
 const storageService = require('./services/storageService');
 const logger = require('./utils/logger');
 const { createVersionService } = require('./services/versionService');
+const invitationRepository = require('./repositories/invitationRepository');
+const auditRepository = require('./repositories/auditRepository');
+const userNotifier = require('./realtime/userNotifier');
+const { createInvitationService } = require('./services/invitationService');
 
 /**
  * Raíz de composición: único lugar donde se conectan las implementaciones concretas
@@ -16,6 +20,16 @@ const versionService = createVersionService({
   logger
 });
 
+// HU-25: invitaciones a proyectos
+const invitationService = createInvitationService({
+  invitations: invitationRepository,
+  projects: projectRepository,
+  audit: auditRepository,
+  notifier: userNotifier,
+  logger
+});
+
 module.exports = {
-  versionService
+  versionService,
+  invitationService
 };
