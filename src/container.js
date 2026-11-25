@@ -8,7 +8,9 @@ const auditRepository = require('./repositories/auditRepository');
 const userNotifier = require('./realtime/userNotifier');
 const { createInvitationService } = require('./services/invitationService');
 const { createMemberService } = require('./services/memberService');
-const { emitAccessChanged } = require('./realtime/accessEvents');
+const { emitAccessChanged, emitCommentsChanged } = require('./realtime/accessEvents');
+const commentRepository = require('./repositories/commentRepository');
+const { createCommentService } = require('./services/commentService');
 
 /**
  * Raíz de composición: único lugar donde se conectan las implementaciones concretas
@@ -40,8 +42,16 @@ const memberService = createMemberService({
   logger
 });
 
+// HU-25: comentarios en hilos (se avisa en tiempo real a quienes tienen el archivo abierto)
+const commentService = createCommentService({
+  comments: commentRepository,
+  projects: projectRepository,
+  onCommentsChanged: emitCommentsChanged
+});
+
 module.exports = {
   versionService,
   invitationService,
-  memberService
+  memberService,
+  commentService
 };
