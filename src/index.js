@@ -7,6 +7,7 @@ const config = require('./config');
 const routes = require('./routes');
 const errorHandler = require('./middlewares/error');
 const setupSwagger = require('./config/swagger');
+const { attachCollabServer, COLLAB_PATH } = require('./realtime/collabServer');
 
 const app = express();
 const PORT = config.port;
@@ -37,9 +38,25 @@ app.get('/', (req, res) => {
 app.use(errorHandler);
 
 // Iniciar el servidor
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`\n🚀 Servidor de seguridad corriendo correctamente!`);
   console.log(`📡 Local:   http://localhost:${PORT}`);
+  console.log(`🤝 Colaboración en tiempo real: ws://localhost:${PORT}${COLLAB_PATH}`);
   console.log(`🌱 Ambiente: ${config.nodeEnv}\n`);
 });
+
+// Edición colaborativa en tiempo real (WebSocket sobre el mismo servidor HTTP)
+const collab = attachCollabServer(server);
+
+// Al detener el servidor, guardar los documentos que se estaban editando
+let shuttingDown = false;
+const shutdown = async () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  await collab.close().catch(() => {});
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 3000).unref();
+};
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 

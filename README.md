@@ -86,3 +86,13 @@ Al duplicar un proyecto se crean archivos propios para la copia y al eliminarlo 
 Los puntos reservados para cifrado están en `src/utils/crypto.js`: `encrypt(data)` debe invocarse antes de guardar un campo sensible de aplicación y `decrypt(data)` después de leerlo. No cifres contraseñas: Supabase Auth las almacena y verifica de forma segura.
 
 
+
+### Colaboración en tiempo real (`ws://localhost:5000/api/collab`)
+Varias personas pueden editar el mismo archivo a la vez, como en Overleaf. El servidor WebSocket comparte el puerto del API y usa [Yjs](https://yjs.dev) (CRDT) para fusionar las ediciones simultáneas sin conflictos.
+
+- **Acceso**: el primer mensaje debe ser `{ "type": "join", "documentId": "<uuid del archivo>", "token": "<token de Supabase>" }`. El token no va en la URL para que no quede en registros. Solo entran el propietario y los miembros del proyecto, y solo se aceptan conexiones desde `CORS_ORIGIN`. Los roles `revisor` e `invitado` reciben los cambios pero no pueden editar.
+- **Guardado**: el servidor guarda el contenido en `nodos.contenido_actual` y en Storage 2 s después del último cambio y cuando sale el último colaborador. `Ctrl+S` sigue creando una versión en el historial.
+- **Presencia**: cada colaborador ve los avatares de quienes están conectados y sus cursores y selecciones de colores.
+- **Compartir**: `POST /api/projects/:id/members` con `{ "email": "..." }` (solo el propietario) agrega a un usuario registrado como `editor`. `GET /api/projects/:id/members` lista los colaboradores. La gestión de roles queda para después.
+- **Avisos en tiempo real**: el panel de proyectos abre una conexión con `{ "type": "subscribe", "token": "..." }`. Cuando un proyecto se comparte con ese usuario, el servidor le envía `{ "type": "project-shared", "projectId", "projectName", "sharedBy" }` y el proyecto aparece en su lista sin recargar. El panel también tiene un botón **Actualizar**.
+- **Autocompletado al compartir**: `GET /api/projects/:id/share-suggestions?q=...` (solo el propietario) devuelve hasta 5 usuarios activos cuyo correo **empieza** con el texto escrito, con un mínimo de 3 caracteres. Excluye al propietario y a quienes ya colaboran. Estos límites dificultan usar el buscador para enumerar los usuarios del sistema.

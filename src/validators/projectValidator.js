@@ -127,8 +127,25 @@ function toMainFileName(projectName) {
   return `${projectName}${TEX_EXTENSION}`;
 }
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_EMAIL_LENGTH = 254;
+
+/**
+ * Valida y normaliza el correo de un usuario con el que se compartirá un proyecto.
+ * @param {unknown} email
+ * @returns {string}
+ */
+function validateEmail(email) {
+  const value = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (!value || value.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(value)) {
+    throw new ValidationError('Ingresa un correo electrónico válido');
+  }
+  return value;
+}
+
 module.exports = {
   validateProjectId,
+  validateEmail,
   validateName,
   validateDescription,
   validateContent,

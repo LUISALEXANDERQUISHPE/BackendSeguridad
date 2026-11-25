@@ -7,8 +7,10 @@ const {
   validateContent,
   validateUpdatePayload,
   buildCopyName,
-  toMainFileName
+  toMainFileName,
+  validateEmail
 } = require('../validators/projectValidator');
+const { ValidationError, NotFoundError, ConflictError } = require('../errors/AppError');
 const {
   buildIdMap,
   buildClonedNodes,
@@ -18,6 +20,13 @@ const {
   buildRelativePath
 } = require('./projectCloneBuilder');
 const { createProjectAccessService } = require('./projectAccessService');
+
+// Autocompletado de correos al compartir: límites que dificultan enumerar usuarios
+const SHARE_SUGGESTIONS = Object.freeze({
+  MIN_QUERY_LENGTH: 3,
+  MAX_QUERY_LENGTH: 254,
+  MAX_RESULTS: 5
+});
 
 /**
  * Servicio de negocio de la HU-17 "Gestión de proyectos":
@@ -31,8 +40,9 @@ const { createProjectAccessService } = require('./projectAccessService');
  * @param {object} deps.storage Almacenamiento de archivos (Supabase Storage)
  * @param {object} deps.compiledFiles Almacenamiento local de PDF compilados
  * @param {object} deps.logger Registro de advertencias
+ * @param {{ notify: Function }} [deps.notifier] Avisos en tiempo real a los usuarios
  */
-function createProjectService({ repository, storage, compiledFiles, logger }) {
+function createProjectService({ repository, storage, compiledFiles, logger, notifier = null }) {
   const access = createProjectAccessService({ repository });
 
   const nowIso = () => new Date().toISOString();
@@ -325,6 +335,78 @@ function createProjectService({ repository, storage, compiledFiles, logger }) {
     await purgeProject(project.id);
   }
 
+  /**
+   * LISTAR colaboradores del proyecto (cualquier miembro puede verlos).
+   */
+  async function listMembers(userId, projectId) {
+    const { project } = await access.resolve(projectId, userId);
+    const members = await repository.findMembers(project.id);
+    return members
+      .filter((member) => member.usuario_id !== project.propietario_id)
+      .map((member) => ({
+        userId: member.usuario_id,
+        name: member.usuarios?.nombre_completo || null,
+        email: member.usuarios?.correo || null,
+        role: member.rol,
+        joinedAt: member.se_unio_en
+      }));
+  }
+
+  /**
+   * SUGERIR usuarios para compartir mientras se escribe el correo (solo el propietario).
+   * Para no exponer la lista de usuarios del sistema: exige un mínimo de caracteres, solo busca
+   * correos que empiecen con lo escrito, devuelve pocos resultados y omite a quienes ya tienen acceso.
+   */
+  async function suggestUsers(userId, projectId, query) {
+    const { project } = await access.resolveAsOwner(projectId, userId, 'compartir');
+    const prefix = typeof query === 'string' ? query.trim().toLowerCase() : '';
+    if (prefix.length < SHARE_SUGGESTIONS.MIN_QUERY_LENGTH || prefix.length > SHARE_SUGGESTIONS.MAX_QUERY_LENGTH) {
+      return [];
+    }
+
+    const members = await repository.findMembers(project.id);
+    const excludeIds = [project.propietario_id, ...members.map((member) => member.usuario_id)];
+    const users = await repository.searchUsersByEmailPrefix(prefix, {
+      excludeIds,
+      limit: SHARE_SUGGESTIONS.MAX_RESULTS
+    });
+    return users.map((user) => ({ name: user.nombre_completo || null, email: user.correo }));
+  }
+
+  /**
+   * COMPARTIR el proyecto con otro usuario registrado (solo el propietario).
+   * Por ahora todos los colaboradores entran como editores: la gestión de roles se hará aparte.
+   */
+  async function shareProject(userId, projectId, { email } = {}) {
+    const { project } = await access.resolveAsOwner(projectId, userId, 'compartir');
+    const normalizedEmail = validateEmail(email);
+
+    const invitee = await repository.findUserByEmail(normalizedEmail);
+    if (!invitee) {
+      throw new NotFoundError('No existe un usuario registrado con ese correo');
+    }
+    if (invitee.id === project.propietario_id) {
+      throw new ValidationError('El propietario ya tiene acceso al proyecto');
+    }
+    if (await repository.findMemberRole(project.id, invitee.id)) {
+      throw new ConflictError('Ese usuario ya colabora en el proyecto');
+    }
+
+    await repository.addMember(project.id, invitee.id, PROJECT_ROLES.EDITOR, userId);
+
+    // Aviso en tiempo real: el proyecto aparece en el panel del invitado sin recargar
+    if (notifier) {
+      const owner = await repository.findUserById(userId).catch(() => null);
+      notifier.notify(invitee.id, {
+        type: 'project-shared',
+        projectId: project.id,
+        projectName: project.nombre,
+        sharedBy: owner?.nombre_completo || owner?.correo || null
+      });
+    }
+    return { userId: invitee.id, name: invitee.nombre_completo, email: invitee.correo, role: PROJECT_ROLES.EDITOR };
+  }
+
   return {
     listProjects,
     getProject,
@@ -332,7 +414,10 @@ function createProjectService({ repository, storage, compiledFiles, logger }) {
     updateProject,
     setArchived,
     duplicateProject,
-    deleteProject
+    deleteProject,
+    listMembers,
+    suggestUsers,
+    shareProject
   };
 }
 

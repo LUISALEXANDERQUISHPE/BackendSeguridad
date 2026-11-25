@@ -240,4 +240,96 @@ router.post('/:id/archive', projectController.archiveProject);
  */
 router.post('/:id/restore', projectController.restoreProject);
 
+/**
+ * @swagger
+ * /api/projects/{id}/members:
+ *   get:
+ *     summary: Listar los colaboradores del proyecto
+ *     tags: [Proyectos]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Colaboradores del proyecto (sin el propietario)
+ *       403:
+ *         description: No tienes acceso al proyecto
+ */
+router.get('/:id/members', projectController.listMembers);
+
+/**
+ * @swagger
+ * /api/projects/{id}/members:
+ *   post:
+ *     summary: Compartir el proyecto con otro usuario registrado (entra como editor)
+ *     tags: [Proyectos]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: colaborador@correo.com
+ *     responses:
+ *       201:
+ *         description: Proyecto compartido exitosamente
+ *       403:
+ *         description: Solo el propietario puede compartirlo
+ *       404:
+ *         description: No existe un usuario con ese correo
+ *       409:
+ *         description: El usuario ya colabora en el proyecto
+ */
+router.post('/:id/members', projectController.shareProject);
+
+/**
+ * @swagger
+ * /api/projects/{id}/share-suggestions:
+ *   get:
+ *     summary: Sugerir usuarios registrados cuyo correo empieza con el texto escrito (solo el propietario)
+ *     tags: [Proyectos]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: query
+ *         name: q
+ *         required: true
+ *         schema:
+ *           type: string
+ *           minLength: 3
+ *         description: Inicio del correo (mínimo 3 caracteres)
+ *     responses:
+ *       200:
+ *         description: Hasta 5 usuarios que aún no tienen acceso al proyecto
+ *       403:
+ *         description: Solo el propietario puede compartir el proyecto
+ */
+router.get('/:id/share-suggestions', projectController.suggestUsers);
+
 module.exports = router;
