@@ -3,6 +3,14 @@ const versionRepository = require('./repositories/versionRepository');
 const storageService = require('./services/storageService');
 const logger = require('./utils/logger');
 const { createVersionService } = require('./services/versionService');
+const invitationRepository = require('./repositories/invitationRepository');
+const auditRepository = require('./repositories/auditRepository');
+const userNotifier = require('./realtime/userNotifier');
+const { createInvitationService } = require('./services/invitationService');
+const { createMemberService } = require('./services/memberService');
+const { emitAccessChanged, emitCommentsChanged } = require('./realtime/accessEvents');
+const commentRepository = require('./repositories/commentRepository');
+const { createCommentService } = require('./services/commentService');
 
 /**
  * Raíz de composición: único lugar donde se conectan las implementaciones concretas
@@ -16,6 +24,34 @@ const versionService = createVersionService({
   logger
 });
 
+// HU-25: invitaciones a proyectos
+const invitationService = createInvitationService({
+  invitations: invitationRepository,
+  projects: projectRepository,
+  audit: auditRepository,
+  notifier: userNotifier,
+  logger
+});
+
+// HU-25: cambiar rol, quitar acceso y salir del proyecto (se aplica en caliente a los editores abiertos)
+const memberService = createMemberService({
+  projects: projectRepository,
+  audit: auditRepository,
+  notifier: userNotifier,
+  onAccessChanged: emitAccessChanged,
+  logger
+});
+
+// HU-25: comentarios en hilos (se avisa en tiempo real a quienes tienen el archivo abierto)
+const commentService = createCommentService({
+  comments: commentRepository,
+  projects: projectRepository,
+  onCommentsChanged: emitCommentsChanged
+});
+
 module.exports = {
-  versionService
+  versionService,
+  invitationService,
+  memberService,
+  commentService
 };

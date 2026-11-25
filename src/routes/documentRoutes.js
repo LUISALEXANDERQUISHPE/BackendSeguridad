@@ -3,6 +3,7 @@ const router = express.Router();
 const documentController = require('../controllers/documentController');
 const authMiddleware = require('../middlewares/auth');
 const versionRoutes = require('./versionRoutes');
+const commentController = require('../controllers/commentController');
 
 // Todas las rutas de documentos requieren autenticación JWT
 router.use(authMiddleware);
@@ -267,6 +268,63 @@ router.delete('/:id', documentController.deleteDocument);
  *                   type: string
  */
 router.post('/:id/compile', documentController.compileDocument);
+
+/**
+ * @swagger
+ * /api/documents/{id}/comments:
+ *   get:
+ *     summary: Hilos de comentarios del archivo (cualquier miembro del proyecto), ordenados por posición
+ *     tags: [Comentarios]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Hilos con sus respuestas
+ *   post:
+ *     summary: Comentar un fragmento seleccionado (propietario o editor)
+ *     tags: [Comentarios]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [content, selectionStart, selectionEnd]
+ *             properties:
+ *               content:
+ *                 type: string
+ *                 maxLength: 2000
+ *               selectionStart:
+ *                 type: integer
+ *               selectionEnd:
+ *                 type: integer
+ *               quotedText:
+ *                 type: string
+ *                 maxLength: 500
+ *     responses:
+ *       201:
+ *         description: Hilo creado
+ *       403:
+ *         description: El lector no puede comentar
+ */
+router.get('/:id/comments', commentController.listThreads);
+router.post('/:id/comments', commentController.createThread);
 
 /**
  * @swagger

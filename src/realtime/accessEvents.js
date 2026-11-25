@@ -18,4 +18,14 @@ function emitAccessChanged({ projectId, userId, role }) {
   accessEvents.emit(ACCESS_CHANGED, { projectId, userId, role: role || null });
 }
 
-module.exports = { accessEvents, emitAccessChanged, ACCESS_CHANGED };
+/**
+ * Evento: 'comments-changed' -> { documentId: string }
+ * Se creó, editó, resolvió o borró un comentario del archivo: quienes lo tienen abierto recargan el panel.
+ */
+const COMMENTS_CHANGED = 'comments-changed';
+
+function emitCommentsChanged(documentId) {
+  accessEvents.emit(COMMENTS_CHANGED, { documentId });
+}
+
+module.exports = { accessEvents, emitAccessChanged, ACCESS_CHANGED, emitCommentsChanged, COMMENTS_CHANGED };

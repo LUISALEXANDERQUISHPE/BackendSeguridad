@@ -70,12 +70,6 @@ function createProjectController(projectService) {
       res.json({ users });
     },
 
-    /** POST /api/projects/:id/members */
-    async shareProject(req, res) {
-      const member = await projectService.shareProject(req.user.id, req.params.id, req.body);
-      res.status(201).json({ message: 'Proyecto compartido exitosamente', member });
-    },
-
     /** DELETE /api/projects/:id */
     async deleteProject(req, res) {
       await projectService.deleteProject(req.user.id, req.params.id);
