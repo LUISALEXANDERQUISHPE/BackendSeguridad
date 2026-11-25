@@ -12,6 +12,8 @@ const PROJECT_LIMITS = Object.freeze({
 const PROJECT_ROLES = Object.freeze({
   OWNER: 'propietario',
   EDITOR: 'editor',
+  VIEWER: 'lector',
+  // Roles heredados del esquema inicial (no se asignan desde la interfaz)
   REVIEWER: 'revisor',
   GUEST: 'invitado'
 });

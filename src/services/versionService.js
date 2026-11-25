@@ -1,13 +1,11 @@
 const { ConflictError, ForbiddenError, NotFoundError, ValidationError } = require('../errors/AppError');
-const { PROJECT_ROLES } = require('../constants/projectConstants');
+const { can, PROJECT_ACTIONS } = require('../constants/permissions');
 const { VERSION_LIMITS, CURRENT_VERSION, PG_UNIQUE_VIOLATION } = require('../constants/versionConstants');
 const { toVersionDto } = require('../mappers/versionMapper');
 const { isTextFile } = require('../utils/fileTypes');
 const textDiff = require('../utils/textDiff');
 const { validateFileId, validateSummary, parsePagination } = require('../validators/versionValidator');
 const { createProjectAccessService } = require('./projectAccessService');
-
-const EDIT_ROLES = new Set([PROJECT_ROLES.OWNER, PROJECT_ROLES.EDITOR]);
 
 /**
  * Servicio de la HU-23 "Control de versiones e historial":
@@ -43,7 +41,7 @@ function createVersionService({ versions, projects, storage, logger, diff = text
   }
 
   function assertCanEdit(role) {
-    if (!EDIT_ROLES.has(role)) {
+    if (!can(role, PROJECT_ACTIONS.MANAGE_VERSIONS)) {
       throw new ForbiddenError('Solo el propietario o un editor pueden modificar el historial de este archivo');
     }
   }
