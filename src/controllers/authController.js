@@ -1,5 +1,6 @@
 const config = require('../config');
 const supabase = require('../config/supabase');
+const { createAuthClient } = require('../config/supabase');
 
 /**
  * Valida los datos para el registro.
@@ -262,9 +263,10 @@ exports.login = async (req, res, next) => {
       });
     }
 
-    // Autenticar contra Supabase Auth.
+    // Autenticar contra Supabase Auth con un cliente propio de esta petición: el cliente
+    // compartido debe seguir usando la clave de servicio (ver createAuthClient).
     const { data: authData, error: authError } =
-      await supabase.auth.signInWithPassword({
+      await createAuthClient().auth.signInWithPassword({
         email: normalizedEmail,
         password
       });
