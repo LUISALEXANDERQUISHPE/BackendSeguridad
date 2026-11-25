@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const projectController = require('../controllers/projectController');
 const invitationController = require('../controllers/invitationController');
+const memberController = require('../controllers/memberController');
 const authMiddleware = require('../middlewares/auth');
 
 // Todas las rutas de proyectos requieren autenticación JWT
@@ -263,6 +264,98 @@ router.post('/:id/restore', projectController.restoreProject);
  *         description: No tienes acceso al proyecto
  */
 router.get('/:id/members', projectController.listMembers);
+
+/**
+ * @swagger
+ * /api/projects/{id}/members/me:
+ *   delete:
+ *     summary: Salir del proyecto (cualquier colaborador; el propietario no puede)
+ *     tags: [Proyectos]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: El usuario ya no tiene acceso al proyecto
+ *       403:
+ *         description: El propietario no puede salir de su proyecto
+ */
+// Debe ir antes de /:id/members/:userId para que "me" no se interprete como un id
+router.delete('/:id/members/me', memberController.leaveProject);
+
+/**
+ * @swagger
+ * /api/projects/{id}/members/{userId}:
+ *   patch:
+ *     summary: Cambiar el rol de un colaborador (solo el propietario). Se aplica al instante en los editores abiertos.
+ *     tags: [Proyectos]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [role]
+ *             properties:
+ *               role:
+ *                 type: string
+ *                 enum: [editor, lector]
+ *     responses:
+ *       200:
+ *         description: Rol actualizado
+ *       403:
+ *         description: Solo el propietario; no se puede cambiar el rol del propietario
+ *       404:
+ *         description: La persona no colabora en el proyecto
+ *   delete:
+ *     summary: Quitar el acceso a un colaborador (solo el propietario). Se le desconecta de los editores abiertos.
+ *     tags: [Proyectos]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Acceso retirado
+ *       403:
+ *         description: Solo el propietario
+ *       404:
+ *         description: La persona no colabora en el proyecto
+ */
+router.patch('/:id/members/:userId', memberController.changeRole);
+router.delete('/:id/members/:userId', memberController.removeMember);
 
 /**
  * @swagger

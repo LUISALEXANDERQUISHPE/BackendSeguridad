@@ -7,6 +7,8 @@ const invitationRepository = require('./repositories/invitationRepository');
 const auditRepository = require('./repositories/auditRepository');
 const userNotifier = require('./realtime/userNotifier');
 const { createInvitationService } = require('./services/invitationService');
+const { createMemberService } = require('./services/memberService');
+const { emitAccessChanged } = require('./realtime/accessEvents');
 
 /**
  * Raíz de composición: único lugar donde se conectan las implementaciones concretas
@@ -29,7 +31,17 @@ const invitationService = createInvitationService({
   logger
 });
 
+// HU-25: cambiar rol, quitar acceso y salir del proyecto (se aplica en caliente a los editores abiertos)
+const memberService = createMemberService({
+  projects: projectRepository,
+  audit: auditRepository,
+  notifier: userNotifier,
+  onAccessChanged: emitAccessChanged,
+  logger
+});
+
 module.exports = {
   versionService,
-  invitationService
+  invitationService,
+  memberService
 };
