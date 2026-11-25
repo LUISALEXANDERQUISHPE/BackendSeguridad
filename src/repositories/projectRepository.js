@@ -141,6 +141,32 @@ function createProjectRepository(db) {
       );
     },
 
+    /** HU-25: cambia el rol de un colaborador. Devuelve null si no era miembro. */
+    async updateMemberRole(projectId, userId, role) {
+      return unwrap(
+        await db
+          .from('miembros_proyecto')
+          .update({ rol: role })
+          .eq('proyecto_id', projectId)
+          .eq('usuario_id', userId)
+          .select('usuario_id, rol')
+          .maybeSingle()
+      );
+    },
+
+    /** HU-25: quita a un colaborador del proyecto. Devuelve true si existía. */
+    async removeMember(projectId, userId) {
+      const removed = unwrap(
+        await db
+          .from('miembros_proyecto')
+          .delete()
+          .eq('proyecto_id', projectId)
+          .eq('usuario_id', userId)
+          .select('usuario_id')
+      ) || [];
+      return removed.length > 0;
+    },
+
     /**
      * Archivo .tex principal (en la raíz) de cada proyecto indicado.
      * @param {string[]} projectIds

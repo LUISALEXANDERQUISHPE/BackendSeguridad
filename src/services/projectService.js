@@ -7,10 +7,8 @@ const {
   validateContent,
   validateUpdatePayload,
   buildCopyName,
-  toMainFileName,
-  validateEmail
+  toMainFileName
 } = require('../validators/projectValidator');
-const { ValidationError, NotFoundError, ConflictError } = require('../errors/AppError');
 const {
   buildIdMap,
   buildClonedNodes,
@@ -373,39 +371,8 @@ function createProjectService({ repository, storage, compiledFiles, logger, noti
     return users.map((user) => ({ name: user.nombre_completo || null, email: user.correo }));
   }
 
-  /**
-   * COMPARTIR el proyecto con otro usuario registrado (solo el propietario).
-   * Por ahora todos los colaboradores entran como editores: la gestión de roles se hará aparte.
-   */
-  async function shareProject(userId, projectId, { email } = {}) {
-    const { project } = await access.resolveAsOwner(projectId, userId, 'compartir');
-    const normalizedEmail = validateEmail(email);
-
-    const invitee = await repository.findUserByEmail(normalizedEmail);
-    if (!invitee) {
-      throw new NotFoundError('No existe un usuario registrado con ese correo');
-    }
-    if (invitee.id === project.propietario_id) {
-      throw new ValidationError('El propietario ya tiene acceso al proyecto');
-    }
-    if (await repository.findMemberRole(project.id, invitee.id)) {
-      throw new ConflictError('Ese usuario ya colabora en el proyecto');
-    }
-
-    await repository.addMember(project.id, invitee.id, PROJECT_ROLES.EDITOR, userId);
-
-    // Aviso en tiempo real: el proyecto aparece en el panel del invitado sin recargar
-    if (notifier) {
-      const owner = await repository.findUserById(userId).catch(() => null);
-      notifier.notify(invitee.id, {
-        type: 'project-shared',
-        projectId: project.id,
-        projectName: project.nombre,
-        sharedBy: owner?.nombre_completo || owner?.correo || null
-      });
-    }
-    return { userId: invitee.id, name: invitee.nombre_completo, email: invitee.correo, role: PROJECT_ROLES.EDITOR };
-  }
+  // HU-25: compartir ya no agrega al colaborador directamente; ahora se le invita y entra al
+  // aceptar (ver invitationService). Así nadie aparece en un proyecto sin haberlo consentido.
 
   return {
     listProjects,
@@ -416,8 +383,7 @@ function createProjectService({ repository, storage, compiledFiles, logger, noti
     duplicateProject,
     deleteProject,
     listMembers,
-    suggestUsers,
-    shareProject
+    suggestUsers
   };
 }
 

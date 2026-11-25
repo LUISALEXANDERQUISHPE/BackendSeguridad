@@ -10,7 +10,7 @@ const { PROJECT_LIMITS, PROJECT_ROLES } = require('../constants/projectConstants
 const { can, PROJECT_ACTIONS } = require('../constants/permissions');
 const { CollabRoom } = require('./collabRoom');
 const userNotifier = require('./userNotifier');
-const { accessEvents, ACCESS_CHANGED } = require('./accessEvents');
+const { accessEvents, ACCESS_CHANGED, COMMENTS_CHANGED } = require('./accessEvents');
 
 const COLLAB_PATH = '/api/collab';
 // Tiempo máximo para que el cliente se identifique después de conectarse
@@ -183,7 +183,13 @@ function createRoomRegistry() {
     }
   }
 
-  return { acquire, release, closeAll, applyAccessChange };
+  /** Avisa a quienes tienen el archivo abierto (si hay sala) que sus comentarios cambiaron. */
+  async function broadcastToDocument(documentId, payload) {
+    const room = await rooms.get(documentId)?.catch(() => null);
+    room?.broadcast(payload);
+  }
+
+  return { acquire, release, closeAll, applyAccessChange, broadcastToDocument };
 }
 
 /**
@@ -319,10 +325,18 @@ function attachCollabServer(httpServer) {
   };
   accessEvents.on(ACCESS_CHANGED, onAccessChanged);
 
+  // HU-25: comentarios nuevos, editados, resueltos o borrados
+  const onCommentsChanged = ({ documentId }) => {
+    registry.broadcastToDocument(documentId, { type: 'comments-changed', documentId })
+      .catch((error) => logger.warn('[collab] No se pudo avisar del cambio de comentarios:', error.message));
+  };
+  accessEvents.on(COMMENTS_CHANGED, onCommentsChanged);
+
   return {
     wss,
     async close() {
       accessEvents.off(ACCESS_CHANGED, onAccessChanged);
+      accessEvents.off(COMMENTS_CHANGED, onCommentsChanged);
       clearInterval(heartbeat);
       for (const socket of wss.clients) socket.close(1001, 'Servidor detenido');
       await registry.closeAll();

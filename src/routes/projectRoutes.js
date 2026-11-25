@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const projectController = require('../controllers/projectController');
+const invitationController = require('../controllers/invitationController');
+const memberController = require('../controllers/memberController');
 const authMiddleware = require('../middlewares/auth');
 
 // Todas las rutas de proyectos requieren autenticación JWT
@@ -265,9 +267,101 @@ router.get('/:id/members', projectController.listMembers);
 
 /**
  * @swagger
- * /api/projects/{id}/members:
+ * /api/projects/{id}/members/me:
+ *   delete:
+ *     summary: Salir del proyecto (cualquier colaborador; el propietario no puede)
+ *     tags: [Proyectos]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: El usuario ya no tiene acceso al proyecto
+ *       403:
+ *         description: El propietario no puede salir de su proyecto
+ */
+// Debe ir antes de /:id/members/:userId para que "me" no se interprete como un id
+router.delete('/:id/members/me', memberController.leaveProject);
+
+/**
+ * @swagger
+ * /api/projects/{id}/members/{userId}:
+ *   patch:
+ *     summary: Cambiar el rol de un colaborador (solo el propietario). Se aplica al instante en los editores abiertos.
+ *     tags: [Proyectos]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [role]
+ *             properties:
+ *               role:
+ *                 type: string
+ *                 enum: [editor, lector]
+ *     responses:
+ *       200:
+ *         description: Rol actualizado
+ *       403:
+ *         description: Solo el propietario; no se puede cambiar el rol del propietario
+ *       404:
+ *         description: La persona no colabora en el proyecto
+ *   delete:
+ *     summary: Quitar el acceso a un colaborador (solo el propietario). Se le desconecta de los editores abiertos.
+ *     tags: [Proyectos]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Acceso retirado
+ *       403:
+ *         description: Solo el propietario
+ *       404:
+ *         description: La persona no colabora en el proyecto
+ */
+router.patch('/:id/members/:userId', memberController.changeRole);
+router.delete('/:id/members/:userId', memberController.removeMember);
+
+/**
+ * @swagger
+ * /api/projects/{id}/invitations:
  *   post:
- *     summary: Compartir el proyecto con otro usuario registrado (entra como editor)
+ *     summary: Invitar uno o varios correos con un rol (HU-25). La persona entra al aceptar.
  *     tags: [Proyectos]
  *     security:
  *       - BearerAuth: []
@@ -284,23 +378,97 @@ router.get('/:id/members', projectController.listMembers);
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - email
+ *             required: [emails, role]
  *             properties:
- *               email:
+ *               emails:
+ *                 oneOf:
+ *                   - type: string
+ *                     example: ana@correo.com, luis@correo.com
+ *                   - type: array
+ *                     items:
+ *                       type: string
+ *               role:
  *                 type: string
- *                 example: colaborador@correo.com
+ *                 enum: [editor, lector]
  *     responses:
  *       201:
- *         description: Proyecto compartido exitosamente
+ *         description: Invitaciones creadas (cada una con su token de enlace, que solo se muestra esta vez) y correos omitidos
+ *       400:
+ *         description: Rol o correos inválidos
  *       403:
- *         description: Solo el propietario puede compartirlo
- *       404:
- *         description: No existe un usuario con ese correo
- *       409:
- *         description: El usuario ya colabora en el proyecto
+ *         description: Solo el propietario puede invitar
+ *   get:
+ *     summary: Invitaciones pendientes del proyecto (solo el propietario)
+ *     tags: [Proyectos]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Invitaciones pendientes
  */
-router.post('/:id/members', projectController.shareProject);
+router.post('/:id/invitations', invitationController.invite);
+router.get('/:id/invitations', invitationController.listProjectInvitations);
+
+/**
+ * @swagger
+ * /api/projects/{id}/invitations/{invitationId}/resend:
+ *   post:
+ *     summary: Reenviar una invitación (nuevo enlace y nuevo plazo; el enlace anterior deja de funcionar)
+ *     tags: [Proyectos]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: path
+ *         name: invitationId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Invitación reenviada
+ */
+router.post('/:id/invitations/:invitationId/resend', invitationController.resend);
+
+/**
+ * @swagger
+ * /api/projects/{id}/invitations/{invitationId}:
+ *   delete:
+ *     summary: Revocar una invitación pendiente
+ *     tags: [Proyectos]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: path
+ *         name: invitationId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Invitación revocada
+ */
+router.delete('/:id/invitations/:invitationId', invitationController.revoke);
 
 /**
  * @swagger
