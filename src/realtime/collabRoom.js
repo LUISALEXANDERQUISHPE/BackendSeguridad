@@ -87,6 +87,26 @@ class CollabRoom {
     return client;
   }
 
+  /** Conexiones abiertas de un usuario en esta sala (puede tener varias pestañas). */
+  socketsOf(userId) {
+    return [...this.clients.entries()].filter(([, client]) => client.userId === userId).map(([socket]) => socket);
+  }
+
+  /**
+   * Cambia en caliente el permiso de edición de un usuario (ej. el propietario lo pasó de editor a lector).
+   * Sus cambios posteriores se rechazan de inmediato, sin esperar a que vuelva a conectarse.
+   * @returns {number} Conexiones afectadas
+   */
+  setUserAccess(userId, canEdit) {
+    const sockets = this.socketsOf(userId);
+    for (const socket of sockets) {
+      this.clients.get(socket).canEdit = canEdit;
+      this.send(socket, { type: 'access', canEdit });
+    }
+    if (sockets.length > 0) this.broadcast({ type: 'presence', users: this.presence() });
+    return sockets.length;
+  }
+
   /** Quita la conexión y avisa al resto. */
   leave(socket) {
     if (!this.clients.delete(socket)) return;

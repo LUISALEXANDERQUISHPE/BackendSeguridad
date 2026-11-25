@@ -7,8 +7,10 @@ const logger = require('../utils/logger');
 const { isValidUuid } = require('../utils/validators');
 const { isTextFile } = require('../utils/fileTypes');
 const { PROJECT_LIMITS, PROJECT_ROLES } = require('../constants/projectConstants');
+const { can, PROJECT_ACTIONS } = require('../constants/permissions');
 const { CollabRoom } = require('./collabRoom');
 const userNotifier = require('./userNotifier');
+const { accessEvents, ACCESS_CHANGED } = require('./accessEvents');
 
 const COLLAB_PATH = '/api/collab';
 // Tiempo máximo para que el cliente se identifique después de conectarse
@@ -17,8 +19,6 @@ const JOIN_TIMEOUT_MS = 5000;
 const HEARTBEAT_MS = 30000;
 // Un mensaje nunca debería superar el tamaño máximo de un archivo (más el margen de base64)
 const MAX_PAYLOAD_BYTES = Math.ceil(PROJECT_LIMITS.MAX_CONTENT_BYTES * 1.5);
-
-const EDIT_ROLES = new Set([PROJECT_ROLES.OWNER, PROJECT_ROLES.EDITOR]);
 
 /** Códigos de cierre propios (rango 4000-4999 reservado para aplicaciones). */
 const CLOSE_CODES = Object.freeze({
@@ -117,11 +117,14 @@ function createRoomRegistry() {
   const rooms = new Map();
   /** @type {Map<string, Promise<void>>} Salas cerrándose: se espera su guardado antes de recrearlas */
   const closing = new Map();
+  /** @type {Map<string, string>} archivo -> proyecto, para aplicar cambios de acceso por proyecto */
+  const projectOfRoom = new Map();
 
   async function acquire(node) {
     await closing.get(node.id);
 
     if (!rooms.has(node.id)) {
+      projectOfRoom.set(node.id, node.proyecto_id);
       const roomPromise = (async () => {
         // Releer el contenido: pudo cambiar mientras la sala anterior se cerraba
         const { data, error } = await supabase.from('nodos').select('contenido_actual').eq('id', node.id).single();
@@ -146,6 +149,7 @@ function createRoomRegistry() {
     if (room.size > 0 || closing.has(room.documentId)) return;
 
     rooms.delete(room.documentId);
+    projectOfRoom.delete(room.documentId);
     const done = room.close()
       .catch((error) => logger.warn('[collab] Error al cerrar la sala:', error.message))
       .finally(() => closing.delete(room.documentId));
@@ -159,7 +163,27 @@ function createRoomRegistry() {
     await Promise.allSettled([...closing.values()]);
   }
 
-  return { acquire, release, closeAll };
+  /**
+   * Aplica en caliente un cambio de rol (o la pérdida del acceso) a las salas abiertas del proyecto.
+   * @param {{ projectId: string, userId: string, role: string|null }} change
+   */
+  async function applyAccessChange({ projectId, userId, role }) {
+    const roomIds = [...projectOfRoom].filter(([, project]) => project === projectId).map(([documentId]) => documentId);
+    for (const documentId of roomIds) {
+      const room = await rooms.get(documentId)?.catch(() => null);
+      if (!room) continue;
+      if (!can(role, PROJECT_ACTIONS.VIEW)) {
+        // Sin acceso: se cierran sus conexiones (el cierre libera la sala si queda vacía)
+        for (const socket of room.socketsOf(userId)) {
+          socket.close(CLOSE_CODES.FORBIDDEN, 'Ya no tienes acceso a este proyecto');
+        }
+      } else {
+        room.setUserAccess(userId, can(role, PROJECT_ACTIONS.EDIT_CONTENT));
+      }
+    }
+  }
+
+  return { acquire, release, closeAll, applyAccessChange };
 }
 
 /**
@@ -251,7 +275,7 @@ function attachCollabServer(httpServer) {
 
         clearTimeout(joinTimer);
         room = acquired;
-        room.join(socket, { userId: user.id, name, canEdit: EDIT_ROLES.has(role) });
+        room.join(socket, { userId: user.id, name, canEdit: can(role, PROJECT_ACTIONS.EDIT_CONTENT) });
       } catch (error) {
         clearTimeout(joinTimer);
         if (error instanceof CollabAccessError) {
@@ -288,9 +312,17 @@ function attachCollabServer(httpServer) {
 
   wss.on('close', () => clearInterval(heartbeat));
 
+  // HU-25: cambios de rol y accesos revocados se aplican a las conexiones abiertas
+  const onAccessChanged = (change) => {
+    registry.applyAccessChange(change)
+      .catch((error) => logger.warn('[collab] No se pudo aplicar el cambio de acceso:', error.message));
+  };
+  accessEvents.on(ACCESS_CHANGED, onAccessChanged);
+
   return {
     wss,
     async close() {
+      accessEvents.off(ACCESS_CHANGED, onAccessChanged);
       clearInterval(heartbeat);
       for (const socket of wss.clients) socket.close(1001, 'Servidor detenido');
       await registry.closeAll();
