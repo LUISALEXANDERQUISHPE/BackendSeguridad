@@ -100,3 +100,43 @@ test('no se guarda si el contenido no cambió', async () => {
   await room.close();
   assert.deepEqual(saved, []);
 });
+
+test('HU-25: al bajar a lector, los cambios posteriores del usuario se rechazan al instante', () => {
+  const { room } = createRoom();
+  const ana = createClient(room, { name: 'Ana' });
+  const luis = createClient(room, { name: 'Luis' });
+
+  ana.text.insert(0, 'A ');
+  assert.equal(room.text.toString(), 'A Hola mundo');
+
+  assert.equal(room.setUserAccess('Ana', false), 1);
+  assert.deepEqual(ana.received.findLast((message) => message.type === 'access'), { type: 'access', canEdit: false });
+  assert.equal(luis.received.at(-1).type, 'presence');
+  assert.equal(luis.received.at(-1).users.find((user) => user.userId === 'Ana').canEdit, false);
+
+  ana.text.insert(0, 'X ');
+  assert.equal(room.text.toString(), 'A Hola mundo', 'el servidor no aplica cambios de un lector');
+  assert.equal(ana.received.at(-1).type, 'error');
+
+  // Al devolverle el permiso, una conexión resincronizada (sin el cambio rechazado) vuelve a editar
+  room.leave(ana.socket);
+  createClient(room, { name: 'Ana', canEdit: false });
+  room.setUserAccess('Ana', true);
+  const anaAgain = room.socketsOf('Ana')[0];
+  const fresh = new Y.Doc();
+  Y.applyUpdate(fresh, Y.encodeStateAsUpdate(room.doc));
+  fresh.on('update', (update) => room.handleMessage(anaAgain, { type: 'update', update: toBase64(update) }));
+  fresh.getText(TEXT_KEY).insert(0, 'B ');
+  assert.equal(room.text.toString(), 'B A Hola mundo');
+});
+
+test('HU-25: socketsOf devuelve todas las pestañas de un usuario y setUserAccess ignora a quien no está', () => {
+  const { room } = createRoom();
+  const tab1 = createClient(room, { name: 'Ana' });
+  const tab2 = createClient(room, { name: 'Ana' });
+  createClient(room, { name: 'Luis' });
+
+  assert.deepEqual(room.socketsOf('Ana'), [tab1.socket, tab2.socket]);
+  assert.equal(room.setUserAccess('Ana', false), 2);
+  assert.equal(room.setUserAccess('Nadie', false), 0);
+});

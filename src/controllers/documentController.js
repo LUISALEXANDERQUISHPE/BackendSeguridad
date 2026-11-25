@@ -11,13 +11,15 @@ const { isValidUuid } = require('../utils/validators');
 const { sendFile } = require('../utils/httpFile');
 const { versionService } = require('../container');
 const { VERSION_LIMITS } = require('../constants/versionConstants');
+const { PROJECT_ROLES } = require('../constants/projectConstants');
+const { can, permissionsOf, PROJECT_ACTIONS } = require('../constants/permissions');
 
 async function resolveProjectAccess(projectId, userId) {
   if (!isValidUuid(projectId)) return { error: 'Identificador de proyecto inválido', status: 400 };
   const { data: project, error } = await supabase.from('proyectos').select('*').eq('id', projectId).maybeSingle();
   if (error) throw error;
   if (!project) return { error: 'Proyecto no encontrado', status: 404 };
-  if (project.propietario_id === userId) return { project, role: 'propietario' };
+  if (project.propietario_id === userId) return { project, role: PROJECT_ROLES.OWNER };
   const { data: membership, error: memberError } = await supabase
     .from('miembros_proyecto').select('rol').eq('proyecto_id', projectId).eq('usuario_id', userId).maybeSingle();
   if (memberError) throw memberError;
@@ -185,8 +187,9 @@ async function getProjectCompilations(projectId) {
   return { lastCompilation, lastSuccessfulCompilation };
 }
 
+// Crear, renombrar, mover y borrar archivos o carpetas del proyecto
 function canEdit(role) {
-  return role === 'propietario' || role === 'editor';
+  return can(role, PROJECT_ACTIONS.MANAGE_FILES);
 }
 
 function isMissingOrderColumn(error) {
@@ -257,7 +260,7 @@ async function resolveDocumentAndAccess(documentId, userId) {
 
   // 3. Verificar si el usuario tiene acceso (es propietario o miembro del proyecto)
   if (project.propietario_id === userId) {
-    return { node, project, role: 'propietario' };
+    return { node, project, role: PROJECT_ROLES.OWNER };
   }
 
   const { data: membership, error: memberError } = await supabase
@@ -310,7 +313,7 @@ exports.createDocument = async (req, res, next) => {
       .insert({
         proyecto_id: project.id,
         usuario_id: userId,
-        rol: 'propietario'
+        rol: PROJECT_ROLES.OWNER
       });
 
     if (memberError) {
@@ -381,7 +384,12 @@ exports.listProjectTree = async (req, res, next) => {
         .eq('proyecto_id', access.project.id).order('nombre', { ascending: true }));
     }
     if (error) throw error;
-    return res.json({ project: { id: access.project.id, name: access.project.nombre }, role: access.role, nodes: nodes || [] });
+    return res.json({
+      project: { id: access.project.id, name: access.project.nombre },
+      role: access.role,
+      permissions: permissionsOf(access.role),
+      nodes: nodes || []
+    });
   } catch (error) {
     next(error);
   }
@@ -669,7 +677,7 @@ exports.listDocuments = async (req, res, next) => {
     if (sharedErr) throw sharedErr;
 
     const projectMap = new Map();
-    (ownedProjects || []).forEach(p => projectMap.set(p.id, { ...p, role: 'propietario' }));
+    (ownedProjects || []).forEach(p => projectMap.set(p.id, { ...p, role: PROJECT_ROLES.OWNER }));
     (sharedMemberships || []).forEach(m => {
       if (m.proyectos && !m.proyectos.esta_archivado && !projectMap.has(m.proyectos.id)) {
         projectMap.set(m.proyectos.id, { ...m.proyectos, role: m.rol });
@@ -721,7 +729,7 @@ exports.listDocuments = async (req, res, next) => {
         projectName: proj.nombre || '',
         name: node.nombre,
         sizeBytes: node.tamano_bytes,
-        role: proj.role || 'invitado',
+        role: proj.role || PROJECT_ROLES.VIEWER,
         createdAt: node.creado_en,
         updatedAt: node.actualizado_en || node.creado_en,
         lastCompilation: comp ? {
@@ -778,6 +786,8 @@ exports.getDocumentById = async (req, res, next) => {
         isText: isTextFile(node.nombre),
         sizeBytes: node.tamano_bytes,
         role,
+        // Acciones permitidas al usuario (el frontend oculta lo que no puede hacer; el backend igual lo valida)
+        permissions: permissionsOf(role),
         createdAt: node.creado_en,
         updatedAt: node.actualizado_en,
         autoSave: autoSaveRecord ? {
@@ -817,7 +827,8 @@ exports.updateDocument = async (req, res, next) => {
 
     const { node, project, role } = access;
 
-    if (role === 'invitado' || role === 'revisor') {
+    // Lista de permitidos (no de prohibidos): un rol nuevo o desconocido nunca puede escribir
+    if (!can(role, PROJECT_ACTIONS.EDIT_CONTENT)) {
       return res.status(403).json({ error: 'No tienes permisos de edición en este documento' });
     }
 
@@ -934,7 +945,7 @@ exports.deleteDocument = async (req, res, next) => {
 
     const { project, role } = access;
 
-    if (role !== 'propietario') {
+    if (!can(role, PROJECT_ACTIONS.MANAGE_PROJECT)) {
       return res.status(403).json({ error: 'Solo el propietario puede eliminar este documento' });
     }
 
@@ -970,10 +981,16 @@ exports.compileDocument = async (req, res, next) => {
       return res.status(access.status).json({ error: access.error });
     }
 
-    const { node, project } = access;
+    const { node, project, role } = access;
 
-    // El contenido enviado es el del archivo abierto en el editor (solo aplica a archivos de texto)
-    const hasNewContent = typeof content === 'string' && isTextFile(node.nombre);
+    if (!can(role, PROJECT_ACTIONS.COMPILE)) {
+      return res.status(403).json({ error: 'No tienes permisos para compilar este proyecto' });
+    }
+
+    // El contenido enviado es el del archivo abierto en el editor (solo aplica a archivos de texto).
+    // Solo quien puede editar lo guarda: un lector compila exactamente lo que ya está guardado,
+    // si no, podría sobrescribir archivos usando "compilar".
+    const hasNewContent = typeof content === 'string' && isTextFile(node.nombre) && can(role, PROJECT_ACTIONS.EDIT_CONTENT);
 
     if (hasNewContent && content !== node.contenido_actual) {
       await supabase
