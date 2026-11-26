@@ -26,7 +26,7 @@ lerna-debug.log*
 *.sw?
 
 # LaTeX storage and build artifacts
-storage/
+/storage/
 *.aux
 *.log
 *.out
