@@ -1,6 +1,5 @@
 const projectRepository = require('../repositories/projectRepository');
 const storageService = require('../services/storageService');
-const latexService = require('../services/latexService');
 const logger = require('../utils/logger');
 const userNotifier = require('../realtime/userNotifier');
 const { createProjectService } = require('../services/projectService');
@@ -82,7 +81,6 @@ function createProjectController(projectService) {
 const projectService = createProjectService({
   repository: projectRepository,
   storage: storageService,
-  compiledFiles: latexService,
   logger,
   notifier: userNotifier
 });

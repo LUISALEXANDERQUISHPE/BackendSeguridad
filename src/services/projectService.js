@@ -36,11 +36,10 @@ const SHARE_SUGGESTIONS = Object.freeze({
  * @param {object} deps
  * @param {object} deps.repository Acceso a datos de proyectos
  * @param {object} deps.storage Almacenamiento de archivos (Supabase Storage)
- * @param {object} deps.compiledFiles Almacenamiento local de PDF compilados
  * @param {object} deps.logger Registro de advertencias
  * @param {{ notify: Function }} [deps.notifier] Avisos en tiempo real a los usuarios
  */
-function createProjectService({ repository, storage, compiledFiles, logger, notifier = null }) {
+function createProjectService({ repository, storage, logger, notifier = null }) {
   const access = createProjectAccessService({ repository });
 
   const nowIso = () => new Date().toISOString();
@@ -63,13 +62,8 @@ function createProjectService({ repository, storage, compiledFiles, logger, noti
    * @param {string} projectId
    */
   async function purgeProject(projectId) {
-    const compilationIds = await repository.findCompilationIds(projectId);
     await repository.deleteProjectCascade(projectId);
-
     await runSafely('eliminar archivos de Storage', () => storage.removeProjectFiles(projectId));
-    for (const compilationId of compilationIds) {
-      await runSafely('eliminar PDF compilado', () => compiledFiles.removeCompiledPdf(compilationId));
-    }
   }
 
   /**
