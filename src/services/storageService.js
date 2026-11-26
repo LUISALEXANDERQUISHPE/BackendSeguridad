@@ -1,8 +1,20 @@
-const fsp = require('fs/promises');
 const supabase = require('../config/supabase');
 const config = require('../config');
 
 const BUCKET = config.storageBucket;
+// Todo se guarda cifrado: el tipo real del archivo no se expone en el bucket
+const ENCRYPTED_CONTENT_TYPE = 'application/octet-stream';
+const PROJECT_PATH_PATTERN = /^proyectos\/([0-9a-fA-F-]{36})\//;
+
+// Se pide al usarse: la capa de seguridad depende de la configuración de Supabase
+const dataProtection = () => require('../security').getSecurity().dataProtection;
+
+/** Proyecto dueño de una ruta del bucket (su llave cifra el archivo). */
+function projectIdFromPath(storagePath) {
+  const match = PROJECT_PATH_PATTERN.exec(String(storagePath || ''));
+  if (!match) throw new Error(`La ruta ${storagePath} no pertenece a ningún proyecto`);
+  return match[1];
+}
 
 /**
  * Todos los archivos de un proyecto viven bajo su propia carpeta en el bucket,
@@ -48,53 +60,40 @@ function getPdfPath(node) {
 }
 
 /**
- * Sube (o reemplaza) un archivo de texto del proyecto
+ * Sube (o reemplaza) un archivo cifrado: Huffman + AES-256-CTR con la llave de su proyecto.
  * @returns {Promise<string>} Ruta del archivo dentro del bucket
  */
-async function uploadSource(storagePath, content) {
+async function uploadEncrypted(storagePath, bytes) {
+  const sealed = await dataProtection().protectBytes(projectIdFromPath(storagePath), bytes);
   const { error } = await supabase.storage
     .from(BUCKET)
-    .upload(storagePath, Buffer.from(content ?? '', 'utf8'), {
-      contentType: 'text/plain; charset=utf-8',
-      upsert: true
-    });
-
+    .upload(storagePath, sealed, { contentType: ENCRYPTED_CONTENT_TYPE, upsert: true });
   if (error) throw error;
   return storagePath;
 }
 
-async function uploadBinary(storagePath, buffer, contentType = 'application/octet-stream') {
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .upload(storagePath, buffer, { contentType, upsert: true });
-  if (error) throw error;
-  return storagePath;
+/** Sube (o reemplaza) un archivo de texto del proyecto. */
+function uploadSource(storagePath, content) {
+  return uploadEncrypted(storagePath, Buffer.from(content ?? '', 'utf8'));
+}
+
+/** Sube (o reemplaza) un archivo binario (imagen, PDF...). El tipo real viaja solo dentro del cifrado. */
+function uploadBinary(storagePath, buffer) {
+  return uploadEncrypted(storagePath, buffer);
 }
 
 /**
- * Sube (o reemplaza) el PDF compilado a partir del archivo local generado por pdflatex
+ * Sube (o reemplaza) el PDF compilado de un archivo .tex.
+ * @param {object} node Archivo .tex compilado
+ * @param {Buffer} pdfBuffer PDF en claro
  * @returns {Promise<string>} Ruta del archivo dentro del bucket
  */
-async function uploadPdf(node, localPdfPath) {
-  const storagePath = getPdfPath(node);
-  const pdfBuffer = await fsp.readFile(localPdfPath);
-
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .upload(storagePath, pdfBuffer, {
-      contentType: 'application/pdf',
-      upsert: true
-    });
-
-  if (error) throw error;
-  return storagePath;
+function uploadPdf(node, pdfBuffer) {
+  return uploadEncrypted(getPdfPath(node), pdfBuffer);
 }
 
-/**
- * Descarga un archivo del bucket
- * @returns {Promise<Buffer|null>} Contenido del archivo o null si no existe
- */
-async function downloadFile(storagePath) {
+/** Descarga el archivo tal como está guardado (cifrado), sin descifrar. */
+async function downloadRaw(storagePath) {
   const { data, error } = await supabase.storage
     .from(BUCKET)
     .download(storagePath);
@@ -104,9 +103,26 @@ async function downloadFile(storagePath) {
 }
 
 /**
- * Copia un archivo dentro del bucket (usado al duplicar proyectos con binarios)
+ * Descarga y descifra un archivo del bucket. Los archivos anteriores al cifrado se devuelven igual.
+ * @returns {Promise<Buffer|null>} Contenido en claro o null si no existe
+ */
+async function downloadFile(storagePath) {
+  const stored = await downloadRaw(storagePath);
+  if (!stored) return null;
+  return dataProtection().revealBytes(projectIdFromPath(storagePath), stored);
+}
+
+/**
+ * Copia un archivo dentro del bucket (usado al duplicar proyectos con binarios).
+ * Si cambia de proyecto se vuelve a cifrar con la llave del proyecto destino.
  */
 async function copyFile(fromPath, toPath) {
+  if (projectIdFromPath(fromPath) !== projectIdFromPath(toPath)) {
+    const content = await downloadFile(fromPath);
+    if (!content) throw new Error(`El archivo ${fromPath} no existe en Storage`);
+    return uploadEncrypted(toPath, content);
+  }
+
   const { error } = await supabase.storage
     .from(BUCKET)
     .copy(fromPath, toPath);
@@ -116,6 +132,11 @@ async function copyFile(fromPath, toPath) {
 }
 
 async function moveFile(fromPath, toPath) {
+  if (projectIdFromPath(fromPath) !== projectIdFromPath(toPath)) {
+    await copyFile(fromPath, toPath);
+    await removeFiles([fromPath]);
+    return toPath;
+  }
   const { error } = await supabase.storage.from(BUCKET).move(fromPath, toPath);
   if (error) throw error;
   return toPath;
@@ -199,6 +220,8 @@ module.exports = {
   uploadBinary,
   uploadPdf,
   downloadFile,
+  downloadRaw,
+  projectIdFromPath,
   copyFile,
   moveFile,
   removeFiles,

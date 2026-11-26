@@ -15,7 +15,7 @@ function createService({ searchResult = [] } = {}) {
       return searchResult;
     }
   };
-  const service = createProjectService({ repository, storage: {}, compiledFiles: {}, logger: { warn() {} } });
+  const service = createProjectService({ repository, storage: {}, logger: { warn() {} } });
   return { service, calls };
 }
 

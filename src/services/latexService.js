@@ -6,21 +6,6 @@ const os = require('os');
 const crypto = require('crypto');
 const config = require('../config');
 
-// Directorio base de almacenamiento para PDFs compilados
-const COMPILATIONS_DIR = path.join(config.storagePath, 'compilations');
-
-/**
- * Inicializa el directorio de compilaciones si no existe
- */
-function ensureStorageDirectories() {
-  if (!fs.existsSync(COMPILATIONS_DIR)) {
-    fs.mkdirSync(COMPILATIONS_DIR, { recursive: true });
-  }
-}
-
-// Ejecutar inicialización de directorios
-ensureStorageDirectories();
-
 /**
  * Genera un mensaje explicativo y amigable para errores comunes de LaTeX,
  * especialmente problemas estructurales en tablas (\noalign, \hline, \\, etc.).
@@ -600,14 +585,9 @@ async function compileProject(files, mainFilePath, options = {}) {
     const pdfFilePath = path.join(workDir, `${jobName}.pdf`);
     const pdfGenerated = fs.existsSync(pdfFilePath);
     const success = pdfGenerated && compilationExitCode === 0 && !isTimedOut;
-    let finalPdfPath = null;
-
-    // Solo persistir el nuevo PDF si la compilación fue exitosa (código 0) y se generó el PDF
-    if (success) {
-      ensureStorageDirectories();
-      finalPdfPath = path.join(COMPILATIONS_DIR, `${compilationId}.pdf`);
-      await fsp.copyFile(pdfFilePath, finalPdfPath);
-    }
+    // El PDF se devuelve en memoria: quien compila decide cómo guardarlo (cifrado con la llave del proyecto).
+    // Nunca queda una copia en claro fuera del directorio temporal, que se borra al terminar.
+    const pdfBuffer = success ? await fsp.readFile(pdfFilePath) : null;
 
     // Si falló pero no se extrajeron errores del log, agregar mensaje descriptivo
     if (!success && errors.length === 0) {
@@ -626,7 +606,7 @@ async function compileProject(files, mainFilePath, options = {}) {
     return {
       success,
       compilationId,
-      pdfPath: finalPdfPath,
+      pdfBuffer,
       errors,
       warnings,
       log: `${logContent}${toolsOutput}`,
@@ -654,40 +634,9 @@ async function compileLatex(texContent, options = {}) {
   return compileProject([{ path: 'document.tex', content: texContent ?? '' }], 'document.tex', options);
 }
 
-/**
- * Obtiene la ruta al archivo PDF compilado persistido
- * @param {string} compilationId Identificador de compilación
- * @returns {string|null} Ruta absoluta o null si no existe
- */
-function getCompiledPdfPath(compilationId) {
-  const filePath = path.join(COMPILATIONS_DIR, `${compilationId}.pdf`);
-  if (fs.existsSync(filePath)) {
-    return filePath;
-  }
-  return null;
-}
-
-/**
- * Elimina un PDF compilado del almacenamiento
- * @param {string} compilationId Identificador de compilación
- */
-async function removeCompiledPdf(compilationId) {
-  const filePath = path.join(COMPILATIONS_DIR, `${compilationId}.pdf`);
-  try {
-    if (fs.existsSync(filePath)) {
-      await fsp.unlink(filePath);
-    }
-  } catch (err) {
-    console.error(`Error al eliminar PDF ${compilationId}:`, err.message);
-  }
-}
-
 module.exports = {
   compileLatex,
   compileProject,
   parseLatexLog,
-  getFriendlyMessage,
-  getCompiledPdfPath,
-  removeCompiledPdf,
-  COMPILATIONS_DIR
+  getFriendlyMessage
 };
