@@ -5,6 +5,7 @@ const documentRoutes = require('./documentRoutes');
 const projectRoutes = require('./projectRoutes');
 const invitationRoutes = require('./invitationRoutes');
 const commentRoutes = require('./commentRoutes');
+const secureRoutes = require('./secureRoutes');
 
 // Rutas de autenticación
 router.use('/auth', authRoutes);
@@ -20,6 +21,9 @@ router.use('/invitations', invitationRoutes);
 
 // HU-25: respuestas, edición, resolución y borrado de comentarios
 router.use('/comments', commentRoutes);
+
+// Canal cifrado: acuerdo de llave (Diffie-Hellman) y prueba del flujo de cifrado
+router.use('/secure', secureRoutes);
 
 /**
  * @swagger
