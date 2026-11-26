@@ -2,10 +2,16 @@ const express = require('express');
 const router = express.Router();
 const config = require('../config');
 const secureController = require('../controllers/secureController');
-const { createSecureTransport } = require('../middlewares/secureTransport');
-const { getSecurity } = require('../security');
 
-const secureTransport = createSecureTransport({ getSessionStore: () => getSecurity().sessionStore });
+/**
+ * @swagger
+ * tags:
+ *   name: Seguridad
+ *   description: >
+ *     Canal cifrado. Toda la API viaja por POST /api/secure/tunnel (ChaCha20 + HMAC-SHA256) con la llave
+ *     acordada en /api/secure/handshake (Diffie-Hellman). Solo el acuerdo de llave y /api/health aceptan
+ *     peticiones sin cifrar (con SECURE_TRANSPORT_REQUIRED=true).
+ */
 
 /**
  * @swagger
@@ -34,31 +40,38 @@ router.post('/handshake', secureController.handshake);
 
 /**
  * @swagger
- * /api/secure/diagnostics/roundtrip:
+ * /api/secure/tunnel:
  *   post:
- *     summary: Prueba el flujo completo (ChaCha20 -> Huffman + AES -> ChaCha20). Solo si SECURE_DIAGNOSTICS_ENABLED=true
+ *     summary: Túnel cifrado por el que viajan todas las peticiones de la API
  *     tags: [Seguridad]
+ *     description: >
+ *       Cuerpo binario nonce | ChaCha20(metadatos + cuerpo) | HMAC. Lo procesa el middleware secureTunnel
+ *       antes de llegar a las rutas, por eso no tiene controlador propio.
  *     parameters:
  *       - in: header
  *         name: X-Secure-Session
  *         required: true
  *         schema:
  *           type: string
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             description: Sobre cifrado { v, sid, nonce, data, tag } cuyo contenido es { content }
  *     responses:
  *       200:
- *         description: Sobre cifrado con { content, report }
+ *         description: Respuesta cifrada (application/octet-stream)
  *       401:
- *         description: Sesión de cifrado inválida o expirada
+ *         description: Sesión de cifrado inválida o expirada (code SECURE_SESSION_EXPIRED)
+ */
+
+/**
+ * @swagger
+ * /api/secure/diagnostics/roundtrip:
+ *   post:
+ *     summary: Prueba el flujo completo (ChaCha20 -> Huffman + AES -> ChaCha20). Solo si SECURE_DIAGNOSTICS_ENABLED=true
+ *     tags: [Seguridad]
+ *     responses:
+ *       200:
+ *         description: "{ content, report }"
  */
 if (config.security.diagnosticsEnabled) {
-  router.post('/diagnostics/roundtrip', secureTransport, secureController.diagnosticRoundtrip);
+  router.post('/diagnostics/roundtrip', secureController.diagnosticRoundtrip);
 }
 
 module.exports = router;

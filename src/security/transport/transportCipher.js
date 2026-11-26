@@ -6,8 +6,7 @@ const { randomBytes } = require('../primitives/random');
 const {
   concatBytes,
   constantTimeEqual,
-  fromBase64,
-  toBase64,
+  readUint32BE,
   uint32BE,
   utf8Decode,
   utf8Encode
@@ -16,13 +15,14 @@ const {
 /**
  * Cifrado del canal navegador <-> servidor: ChaCha20 + HMAC-SHA256 (cifrar y luego firmar).
  *
- * El navegador tiene una copia idéntica de este archivo (SeguridadFrontend/src/security/
- * transportCipher.ts): cualquier cambio de formato debe hacerse en ambos.
+ * El navegador tiene una copia equivalente (SeguridadFrontend/src/security/transportCipher.ts):
+ * cualquier cambio de formato debe hacerse en ambos.
  */
 
 const PROTOCOL_VERSION = 1;
 const TAG_SIZE = 32;
 const KEY_DERIVATION_INFO = 'SecureLeaf transport v1';
+const MAX_META_BYTES = 64 * 1024;
 
 /** Cada dirección usa sus propias llaves: un mensaje del servidor no sirve como uno del cliente. */
 const DIRECTIONS = Object.freeze({
@@ -43,14 +43,14 @@ function deriveSessionKeys(sharedSecret, clientPublicKey, serverPublicKey) {
   };
 }
 
-/** Datos asociados firmados (no cifrados): versión, sesión y dirección del mensaje. */
-function associatedData(sessionId, direction) {
-  const label = utf8Encode(`SecureLeaf-v${PROTOCOL_VERSION}|${sessionId}|${direction}`);
+/**
+ * Datos asociados firmados (no cifrados): versión, canal y dirección del mensaje.
+ * "channel" es la sesión (HTTP) o "sesión#conexión" (WebSocket): un mensaje de un canal
+ * no se acepta en otro.
+ */
+function associatedData(channel, direction) {
+  const label = utf8Encode(`SecureLeaf-v${PROTOCOL_VERSION}|${channel}|${direction}`);
   return concatBytes(uint32BE(label.length), label);
-}
-
-function computeTag(macKey, sessionId, direction, nonce, ciphertext) {
-  return hmacSha256(macKey, concatBytes(associatedData(sessionId, direction), nonce, ciphertext));
 }
 
 function directionKeys(keys, direction) {
@@ -59,86 +59,62 @@ function directionKeys(keys, direction) {
   return selected;
 }
 
-/**
- * Cifra bytes para la dirección indicada.
- * @returns {{ nonce: Uint8Array, ciphertext: Uint8Array, tag: Uint8Array }}
- */
-function sealBytes(keys, sessionId, direction, plaintext) {
+/** Trama cifrada: nonce (12) | datos cifrados con ChaCha20 | firma (32). */
+function sealFrame(keys, channel, direction, plaintext) {
   const { encryption, mac } = directionKeys(keys, direction);
   const nonce = randomBytes(CHACHA20_NONCE_SIZE);
   const ciphertext = chacha20(encryption, nonce, plaintext);
-  const tag = computeTag(mac, sessionId, direction, nonce, ciphertext);
-  return { nonce, ciphertext, tag };
+  const tag = hmacSha256(mac, concatBytes(associatedData(channel, direction), nonce, ciphertext));
+  return concatBytes(nonce, ciphertext, tag);
 }
 
 /**
- * Verifica la firma y descifra. Si el mensaje fue alterado, truncado o pertenece a otra
- * sesión/dirección, falla antes de descifrar.
+ * Verifica la firma y descifra. Si la trama fue alterada, truncada o pertenece a otro
+ * canal/dirección, falla antes de descifrar.
  */
-function openBytes(keys, sessionId, direction, { nonce, ciphertext, tag }) {
-  const { encryption, mac } = directionKeys(keys, direction);
-  if (nonce.length !== CHACHA20_NONCE_SIZE || tag.length !== TAG_SIZE) {
-    throw new Error('Mensaje cifrado con formato inválido');
+function openFrame(keys, channel, direction, frame) {
+  if (!(frame instanceof Uint8Array) || frame.length < CHACHA20_NONCE_SIZE + TAG_SIZE) {
+    throw new Error('Trama cifrada incompleta');
   }
-  const expected = computeTag(mac, sessionId, direction, nonce, ciphertext);
+  const { encryption, mac } = directionKeys(keys, direction);
+  const nonce = frame.subarray(0, CHACHA20_NONCE_SIZE);
+  const ciphertext = frame.subarray(CHACHA20_NONCE_SIZE, frame.length - TAG_SIZE);
+  const tag = frame.subarray(frame.length - TAG_SIZE);
+  const expected = hmacSha256(mac, concatBytes(associatedData(channel, direction), nonce, ciphertext));
   if (!constantTimeEqual(expected, tag)) throw new Error('Mensaje cifrado alterado o incompleto');
   return chacha20(encryption, nonce, ciphertext);
 }
 
-/** Sobre JSON para peticiones HTTP: { v, sid, nonce, data, tag } en base64. */
-function sealJson(keys, sessionId, direction, payload) {
-  const json = JSON.stringify(payload === undefined ? null : payload);
-  const { nonce, ciphertext, tag } = sealBytes(keys, sessionId, direction, utf8Encode(json));
-  return {
-    v: PROTOCOL_VERSION,
-    sid: sessionId,
-    nonce: toBase64(nonce),
-    data: toBase64(ciphertext),
-    tag: toBase64(tag)
-  };
+/** Nonce de una trama (sirve para detectar tramas repetidas). */
+function frameNonce(frame) {
+  return frame.subarray(0, CHACHA20_NONCE_SIZE);
 }
 
-function isEnvelope(value) {
-  return Boolean(value) && typeof value === 'object' &&
-    typeof value.nonce === 'string' && typeof value.data === 'string' && typeof value.tag === 'string';
+/**
+ * Mensaje del túnel HTTP antes de cifrar: largo de metadatos (4) | metadatos JSON | cuerpo.
+ * Los metadatos llevan método, ruta y cabeceras (petición) o estado y cabeceras (respuesta).
+ */
+function packMessage(meta, body) {
+  const metaBytes = utf8Encode(JSON.stringify(meta));
+  return concatBytes(uint32BE(metaBytes.length), metaBytes, body ?? new Uint8Array(0));
 }
 
-function openJson(keys, sessionId, direction, envelope) {
-  if (!isEnvelope(envelope) || envelope.v !== PROTOCOL_VERSION || envelope.sid !== sessionId) {
-    throw new Error('Mensaje cifrado con formato inválido');
-  }
-  const plaintext = openBytes(keys, sessionId, direction, {
-    nonce: fromBase64(envelope.nonce),
-    ciphertext: fromBase64(envelope.data),
-    tag: fromBase64(envelope.tag)
-  });
-  return JSON.parse(utf8Decode(plaintext));
-}
-
-/** Trama binaria para WebSocket (edición en tiempo real): nonce | cifrado | firma. */
-function sealFrame(keys, sessionId, direction, plaintext) {
-  const { nonce, ciphertext, tag } = sealBytes(keys, sessionId, direction, plaintext);
-  return concatBytes(nonce, ciphertext, tag);
-}
-
-function openFrame(keys, sessionId, direction, frame) {
-  if (frame.length < CHACHA20_NONCE_SIZE + TAG_SIZE) throw new Error('Trama cifrada incompleta');
-  return openBytes(keys, sessionId, direction, {
-    nonce: frame.subarray(0, CHACHA20_NONCE_SIZE),
-    ciphertext: frame.subarray(CHACHA20_NONCE_SIZE, frame.length - TAG_SIZE),
-    tag: frame.subarray(frame.length - TAG_SIZE)
-  });
+function unpackMessage(bytes) {
+  if (bytes.length < 4) throw new Error('Mensaje del túnel incompleto');
+  const metaLength = readUint32BE(bytes, 0);
+  if (metaLength > MAX_META_BYTES || 4 + metaLength > bytes.length) throw new Error('Mensaje del túnel inválido');
+  const meta = JSON.parse(utf8Decode(bytes.subarray(4, 4 + metaLength)));
+  if (!meta || typeof meta !== 'object') throw new Error('Mensaje del túnel inválido');
+  return { meta, body: bytes.subarray(4 + metaLength) };
 }
 
 module.exports = {
   DIRECTIONS,
   PROTOCOL_VERSION,
   deriveSessionKeys,
-  sealBytes,
-  openBytes,
-  sealJson,
-  openJson,
-  isEnvelope,
   sealFrame,
-  openFrame
+  openFrame,
+  frameNonce,
+  packMessage,
+  unpackMessage
 };

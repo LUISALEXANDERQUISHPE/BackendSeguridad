@@ -8,6 +8,8 @@ const routes = require('./routes');
 const errorHandler = require('./middlewares/error');
 const setupSwagger = require('./config/swagger');
 const { attachCollabServer, COLLAB_PATH } = require('./realtime/collabServer');
+const { createSecureTunnel } = require('./middlewares/secureTunnel');
+const { getSecurity } = require('./security');
 
 const app = express();
 const PORT = config.port;
@@ -17,6 +19,15 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 app.use(cors({ origin: config.corsOrigin, credentials: true }));
+
+// Canal cifrado (ChaCha20): descifra cada petición antes de las rutas y cifra su respuesta.
+// Va antes de express.json porque el cuerpo real viene dentro de la trama cifrada.
+app.use(createSecureTunnel({
+  getSessionStore: () => getSecurity().sessionStore,
+  maxBytes: config.security.tunnelMaxBytes,
+  required: config.security.transportRequired
+}));
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 

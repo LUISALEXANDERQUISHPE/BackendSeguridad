@@ -8,7 +8,6 @@ module.exports = {
   storageBucket: process.env.SUPABASE_STORAGE_BUCKET || 'DocumentosSecureLeaf',
   latexEngine: process.env.LATEX_ENGINE || 'pdflatex',
   latexTimeoutMs: parseInt(process.env.LATEX_TIMEOUT_MS, 10) || 30000,
-  storagePath: process.env.STORAGE_PATH || require('path').join(__dirname, '../../storage'),
 
   // Cifrado propio (ver src/security). Los valores de Diffie-Hellman deben coincidir con el .env del frontend.
   security: {
@@ -16,7 +15,11 @@ module.exports = {
     dhPrimeHex: process.env.DH_PRIME_HEX,
     dhGenerator: process.env.DH_GENERATOR || '2',
     sessionTtlMs: parseInt(process.env.SECURE_SESSION_TTL_MS, 10) || 60 * 60 * 1000,
-    diagnosticsEnabled: process.env.SECURE_DIAGNOSTICS_ENABLED === 'true'
+    diagnosticsEnabled: process.env.SECURE_DIAGNOSTICS_ENABLED === 'true',
+    // true: la API solo acepta peticiones por el túnel cifrado (excepto el acuerdo de llave y /health)
+    transportRequired: process.env.SECURE_TRANSPORT_REQUIRED !== 'false',
+    // Tamaño máximo de una petición cifrada (los archivos van en base64 dentro del JSON: 10 MB + margen)
+    tunnelMaxBytes: parseInt(process.env.SECURE_TUNNEL_MAX_BYTES, 10) || 16 * 1024 * 1024
   }
 };
 

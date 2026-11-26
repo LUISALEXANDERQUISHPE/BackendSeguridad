@@ -34,7 +34,9 @@ function createHandshakeService({ group, sessionStore }) {
     return {
       sessionId: session.id,
       serverPublicKey: toBase64(serverKeyPair.publicKey),
-      expiresAt: new Date(session.expiresAt).toISOString()
+      expiresAt: new Date(session.expiresAt).toISOString(),
+      // El navegador corrige con esto la hora de sus peticiones (el túnel rechaza las viejas)
+      serverTime: Date.now()
     };
   }
 

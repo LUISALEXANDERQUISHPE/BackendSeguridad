@@ -6,6 +6,7 @@
 
 const DEFAULT_MAX_SESSIONS = 10000;
 const MAX_REMEMBERED_NONCES = 5000;
+const MAX_CHANNELS_PER_SESSION = 500;
 
 function createSessionStore({ ttlMs, maxSessions = DEFAULT_MAX_SESSIONS, now = () => Date.now() }) {
   const sessions = new Map();
@@ -23,7 +24,7 @@ function createSessionStore({ ttlMs, maxSessions = DEFAULT_MAX_SESSIONS, now = (
       // Si sigue llena, se descarta la más antigua (Map conserva el orden de inserción)
       if (sessions.size >= maxSessions) sessions.delete(sessions.keys().next().value);
     }
-    const session = { id, keys, expiresAt: now() + ttlMs, seenNonces: new Set() };
+    const session = { id, keys, expiresAt: now() + ttlMs, seenNonces: new Set(), channels: new Set() };
     sessions.set(id, session);
     return session;
   }
@@ -38,24 +39,35 @@ function createSessionStore({ ttlMs, maxSessions = DEFAULT_MAX_SESSIONS, now = (
     return session;
   }
 
+  /** Agrega a un conjunto con tamaño máximo; devuelve false si el valor ya estaba. */
+  function addOnce(set, value, limit) {
+    if (set.has(value)) return false;
+    if (set.size >= limit) set.delete(set.values().next().value);
+    set.add(value);
+    return true;
+  }
+
   /**
-   * Registra el nonce de un mensaje recibido. Devuelve false si ya se había visto:
-   * así un mensaje capturado no puede reenviarse (repetición).
+   * Registra el nonce de una petición recibida. Devuelve false si ya se había visto:
+   * así una petición capturada no puede reenviarse (repetición).
    */
   function rememberNonce(session, nonceKey) {
-    if (session.seenNonces.has(nonceKey)) return false;
-    if (session.seenNonces.size >= MAX_REMEMBERED_NONCES) {
-      session.seenNonces.delete(session.seenNonces.values().next().value);
-    }
-    session.seenNonces.add(nonceKey);
-    return true;
+    return addOnce(session.seenNonces, nonceKey, MAX_REMEMBERED_NONCES);
+  }
+
+  /**
+   * Reserva el identificador de una conexión WebSocket. Cada conexión usa uno nuevo:
+   * las tramas de una conexión no se pueden repetir en otra.
+   */
+  function claimChannel(session, channelId) {
+    return addOnce(session.channels, channelId, MAX_CHANNELS_PER_SESSION);
   }
 
   function remove(id) {
     sessions.delete(id);
   }
 
-  return { save, get, remove, rememberNonce, removeExpired, size: () => sessions.size };
+  return { save, get, remove, rememberNonce, claimChannel, removeExpired, size: () => sessions.size };
 }
 
 module.exports = { createSessionStore };
