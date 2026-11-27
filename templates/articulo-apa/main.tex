@@ -1,0 +1,102 @@
+% ============================================================
+% Plantilla: Artículo con normas APA 7.ª edición (formato de estudiante)
+% Las citas y referencias las genera biblatex-apa (Recompilar ejecuta biber automáticamente).
+%   \textcite{clave}  ->  Autor (año)
+%   \parencite{clave} ->  (Autor, año)
+% ============================================================
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{mathptmx}                 % Times New Roman, como pide APA
+\usepackage[spanish,es-tabla]{babel}
+\usepackage[margin=2.54cm,headheight=15pt]{geometry}  % márgenes de 1 pulgada
+\usepackage{setspace}
+\usepackage{csquotes}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage[style=apa,backend=biber]{biblatex}
+\usepackage[hidelinks]{hyperref}
+
+\addbibresource{referencias.bib}
+\DeclareLanguageMapping{spanish}{spanish-apa}
+
+\doublespacing
+\setlength{\parindent}{1.27cm}
+
+% Número de página arriba a la derecha
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0pt}
+
+% Títulos con los niveles de APA (centrado en negrita, izquierda en negrita, izquierda en negrita cursiva)
+\makeatletter
+\renewcommand{\section}{\@startsection{section}{1}{0pt}{1em}{0.5em}{\centering\normalfont\bfseries}}
+\renewcommand{\subsection}{\@startsection{subsection}{2}{0pt}{1em}{0.5em}{\normalfont\bfseries}}
+\renewcommand{\subsubsection}{\@startsection{subsubsection}{3}{0pt}{1em}{0.5em}{\normalfont\bfseries\itshape}}
+\makeatother
+\setcounter{secnumdepth}{0}
+
+\captionsetup{labelfont=bf, labelsep=newline, singlelinecheck=false, textfont=it}
+
+\begin{document}
+
+% ---------- Portada de estudiante (APA 7) ----------
+\begin{titlepage}
+  \centering
+  \vspace*{3cm}
+  {\bfseries Título del Trabajo en Mayúsculas y Minúsculas\par}
+  \vspace{2em}
+  Nombre del Estudiante\par
+  Departamento o Facultad, Nombre de la Universidad\par
+  Código y Nombre de la Asignatura\par
+  Nombre del Docente\par
+  \today\par
+\end{titlepage}
+
+\setcounter{page}{2}
+
+% ---------- Cuerpo ----------
+\begin{center}
+  \textbf{Título del Trabajo en Mayúsculas y Minúsculas}
+\end{center}
+
+El texto comienza aquí con sangría en la primera línea de cada párrafo. Según
+\textcite{apa2020}, el estilo APA busca claridad y precisión en la comunicación
+científica. Las citas parentéticas se escriben así \parencite{lamport1994}; con dos
+autores, dentro del paréntesis se unen con «\&» \parencite{goossens2004}.
+
+\section{Método}
+Describe a los participantes, los instrumentos y el procedimiento.
+
+\subsection{Participantes}
+Indica el número de participantes y sus características.
+
+\subsubsection{Criterios de inclusión}
+Detalla los criterios utilizados.
+
+\section{Resultados}
+La Tabla~\ref{tab:descriptivos} presenta los estadísticos descriptivos.
+
+\begin{table}[htbp]
+  \caption{Estadísticos descriptivos de las variables}
+  \label{tab:descriptivos}
+  \begin{tabular}{lcc}
+    \toprule
+    Variable & \textit{M} & \textit{DE} \\
+    \midrule
+    Edad & 21.4 & 2.3 \\
+    Promedio académico & 8.7 & 0.9 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Discusión}
+Interpreta los resultados a la luz de la literatura \parencite{knuth1984}.
+
+\newpage
+\printbibliography[title=Referencias]
+
+\end{document}

@@ -1,0 +1,76 @@
+% ============================================================
+% Plantilla: Artículo científico (estructura IMRyD)
+% Compila con pdflatex + bibtex.
+% ============================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[spanish,es-tabla]{babel}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage[hidelinks]{hyperref}
+
+\title{Título del artículo: claro, específico y breve}
+\author{
+  Primer Autor\thanks{Universidad, correo@ejemplo.com} \and
+  Segundo Autor\thanks{Institución, correo@ejemplo.com}
+}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Resume en un párrafo el objetivo, la metodología, los resultados principales y la
+conclusión del trabajo (150 a 250 palabras).
+
+\medskip
+\noindent\textbf{Palabras clave:} palabra uno; palabra dos; palabra tres.
+\end{abstract}
+
+\section{Introducción}
+Presenta el problema, su relevancia y el objetivo del artículo. Cita trabajos previos
+\cite{lamport1994}.
+
+\section{Materiales y métodos}
+Describe cómo se realizó el estudio para que pueda reproducirse. El error cuadrático
+medio se calcula como:
+\begin{equation}
+  \mathrm{ECM} = \frac{1}{n} \sum_{i=1}^{n} \left( y_i - \hat{y}_i \right)^2
+  \label{eq:ecm}
+\end{equation}
+
+\section{Resultados}
+La Tabla~\ref{tab:comparacion} compara los métodos evaluados según la
+ecuación~\eqref{eq:ecm}.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Comparación de los métodos evaluados.}
+  \label{tab:comparacion}
+  \begin{tabular}{lrr}
+    \toprule
+    Método & ECM & Tiempo (ms) \\
+    \midrule
+    Método A & 0.042 & 120 \\
+    Método B & 0.035 & 180 \\
+    Propuesto & \textbf{0.028} & 140 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Discusión}
+Interpreta los resultados y compáralos con la literatura \cite{knuth1984}.
+
+\section{Conclusiones}
+Resume los aportes del trabajo y propone líneas futuras.
+
+\bibliographystyle{plain}
+\bibliography{referencias}
+
+\end{document}

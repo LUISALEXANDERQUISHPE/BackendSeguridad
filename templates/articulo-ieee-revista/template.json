@@ -1,0 +1,9 @@
+{
+  "id": "643ba665-52ad-4bc9-8d87-85dbc6c01877",
+  "name": "Artículo IEEE (revista)",
+  "category": "articulo",
+  "description": "Formato IEEEtran para revistas (Transactions/Journals): dos columnas, biografías de autores, citas numéricas [1] y referencias estilo IEEE.",
+  "mainFile": "main.tex",
+  "tags": ["IEEE", "revista", "journal", "transactions", "dos columnas", "bibtex"],
+  "order": 4
+}

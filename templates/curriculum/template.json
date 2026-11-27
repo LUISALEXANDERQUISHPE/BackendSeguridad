@@ -1,0 +1,9 @@
+{
+  "id": "d762af36-8b41-4f4c-a110-87e227d8cc32",
+  "name": "Currículum vitae",
+  "category": "cv",
+  "description": "Hoja de vida de una página con perfil, experiencia, educación, habilidades e idiomas.",
+  "mainFile": "main.tex",
+  "tags": ["cv", "currículum", "hoja de vida", "empleo"],
+  "order": 14
+}

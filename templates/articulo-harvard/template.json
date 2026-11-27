@@ -1,0 +1,9 @@
+{
+  "id": "7c880629-6690-41e0-83fa-99927ae51533",
+  "name": "Artículo estilo Harvard",
+  "category": "normas",
+  "description": "Artículo con el sistema Harvard (autor-año): citas (Autor, año), referencias en orden alfabético y fácil de adaptar a la guía de tu universidad.",
+  "mainFile": "main.tex",
+  "tags": ["Harvard", "autor-año", "negocios", "economía", "biblatex"],
+  "order": 10
+}

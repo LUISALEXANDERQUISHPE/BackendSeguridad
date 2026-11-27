@@ -18,6 +18,7 @@ const {
   buildRelativePath
 } = require('./projectCloneBuilder');
 const { createProjectAccessService } = require('./projectAccessService');
+const { buildTemplateCopy } = require('./templateProjectBuilder');
 
 // Autocompletado de correos al compartir: límites que dificultan enumerar usuarios
 const SHARE_SUGGESTIONS = Object.freeze({
@@ -38,8 +39,9 @@ const SHARE_SUGGESTIONS = Object.freeze({
  * @param {object} deps.storage Almacenamiento de archivos (Supabase Storage)
  * @param {object} deps.logger Registro de advertencias
  * @param {{ notify: Function }} [deps.notifier] Avisos en tiempo real a los usuarios
+ * @param {{ loadForCopy: Function }} [deps.templates] Catálogo de plantillas del sistema (HU-16)
  */
-function createProjectService({ repository, storage, logger, notifier = null }) {
+function createProjectService({ repository, storage, logger, notifier = null, templates = null }) {
   const access = createProjectAccessService({ repository });
 
   const nowIso = () => new Date().toISOString();
@@ -192,6 +194,56 @@ function createProjectService({ repository, storage, logger, notifier = null }) 
       project: toProjectDto(project, { role: PROJECT_ROLES.OWNER, mainNode }),
       storageSynced: Boolean(mainNode?.storage_path)
     };
+  }
+
+  /**
+   * Guarda en Storage (cifrados) los archivos copiados de una plantilla, con su ruta de carpetas.
+   * Un texto que no llegue a Storage sigue a salvo en la base de datos; un binario no, por eso
+   * su fallo detiene la creación (y se revierte el proyecto).
+   */
+  async function uploadTemplateFiles(uploads, projectId) {
+    for (const upload of uploads) {
+      const targetPath = storage.getNestedFilePath(projectId, upload.path);
+      if (upload.isText) {
+        await runSafely('guardar en Storage un archivo de la plantilla', async () => {
+          await storage.uploadSource(targetPath, upload.content.toString('utf8'));
+          await repository.updateNode(upload.nodeId, { storage_path: targetPath });
+        });
+      } else {
+        await storage.uploadBinary(targetPath, upload.content);
+        await repository.updateNode(upload.nodeId, { storage_path: targetPath });
+      }
+    }
+  }
+
+  /**
+   * CREAR un proyecto a partir de una plantilla del sistema (HU-16).
+   * El proyecto es una COPIA independiente: tiene sus propios archivos, versiones y llave de
+   * cifrado, y modificarlo o eliminarlo nunca afecta a la plantilla base.
+   */
+  async function createProjectFromTemplate(userId, { templateId, name, description } = {}) {
+    if (!templates) {
+      throw new Error('El catálogo de plantillas no está configurado');
+    }
+    const { template, files } = await templates.loadForCopy(templateId);
+    const nombre = validateName(name ?? template.name);
+    const descripcion = validateDescription(description ?? template.description);
+    const projectData = { nombre, descripcion, plantilla_id: template.id };
+
+    const { project, mainNode } = await createWithRollback(projectData, userId, async created => {
+      const copy = buildTemplateCopy({ files, mainFile: template.mainFile, projectId: created.id, userId });
+
+      // Una sola inserción: cada carpeta va antes que sus hijos y el .tex principal primero
+      const inserted = await repository.insertNodes([...copy.folders, ...copy.files]);
+      await repository.insertVersions(
+        buildInitialVersions(copy.files, userId, `Creado desde la plantilla "${template.name}"`)
+      );
+      await uploadTemplateFiles(copy.uploads, created.id);
+
+      return inserted.find(node => node.id === copy.mainNodeId) ?? null;
+    });
+
+    return toProjectDto(project, { role: PROJECT_ROLES.OWNER, mainNode });
   }
 
   /**
@@ -372,6 +424,7 @@ function createProjectService({ repository, storage, logger, notifier = null }) 
     listProjects,
     getProject,
     createProject,
+    createProjectFromTemplate,
     updateProject,
     setArchived,
     duplicateProject,

@@ -1,0 +1,82 @@
+% ============================================================
+% Plantilla: Artículo IEEE para conferencias (clase IEEEtran, dos columnas)
+% Compila con pdflatex + bibtex.
+% ============================================================
+\documentclass[conference]{IEEEtran}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-tabla]{babel}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+
+% IEEEtran no traduce este título con babel
+\renewcommand{\IEEEkeywordsname}{Palabras clave}
+
+\begin{document}
+
+\title{Título del artículo para la conferencia}
+
+\author{
+  \IEEEauthorblockN{Primer Autor}
+  \IEEEauthorblockA{\textit{Departamento} \\
+    \textit{Universidad}\\
+    Ciudad, País \\
+    correo@ejemplo.com}
+  \and
+  \IEEEauthorblockN{Segundo Autor}
+  \IEEEauthorblockA{\textit{Departamento} \\
+    \textit{Universidad}\\
+    Ciudad, País \\
+    correo@ejemplo.com}
+}
+
+\maketitle
+
+\begin{abstract}
+Resume el problema, el método, los resultados y la conclusión en un solo párrafo
+de no más de 250 palabras.
+\end{abstract}
+
+\begin{IEEEkeywords}
+palabra uno, palabra dos, palabra tres
+\end{IEEEkeywords}
+
+\section{Introducción}
+Presenta el contexto y la contribución principal del trabajo \cite{lamport1994}.
+
+\section{Trabajos relacionados}
+Resume los enfoques existentes y en qué se diferencia tu propuesta \cite{knuth1984}.
+
+\section{Método propuesto}
+Describe la propuesta. Las ecuaciones se numeran automáticamente:
+\begin{equation}
+  f(x) = \sum_{k=0}^{n} a_k x^k
+  \label{eq:polinomio}
+\end{equation}
+
+\section{Resultados experimentales}
+La Tabla~\ref{tab:resultados} resume los resultados obtenidos con~\eqref{eq:polinomio}.
+
+\begin{table}[htbp]
+  \caption{Resultados experimentales}
+  \label{tab:resultados}
+  \centering
+  \begin{tabular}{lcc}
+    \toprule
+    Configuración & Precisión & Recall \\
+    \midrule
+    Base & 0.81 & 0.77 \\
+    Propuesta & \textbf{0.89} & \textbf{0.85} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Conclusiones}
+Resume los aportes y el trabajo futuro.
+
+\bibliographystyle{IEEEtran}
+\bibliography{referencias}
+
+\end{document}

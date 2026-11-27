@@ -1,0 +1,9 @@
+{
+  "id": "b99377b7-2951-4171-9752-5765afa53233",
+  "name": "Artículo científico",
+  "category": "articulo",
+  "description": "Artículo de investigación con resumen, palabras clave, secciones IMRyD, ecuaciones, tabla y referencias.",
+  "mainFile": "main.tex",
+  "tags": ["artículo", "investigación", "revista", "IMRyD", "bibtex"],
+  "order": 2
+}

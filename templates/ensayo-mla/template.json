@@ -1,0 +1,9 @@
+{
+  "id": "f19d5d71-e80c-40fb-b60f-11962c8cbf04",
+  "name": "Ensayo estilo MLA",
+  "category": "normas",
+  "description": "Ensayo con normas MLA 9.ª edición: encabezado del estudiante, apellido y página en cada hoja, citas (Autor página) y lista de obras citadas.",
+  "mainFile": "main.tex",
+  "tags": ["MLA", "ensayo", "humanidades", "literatura", "biblatex"],
+  "order": 9
+}

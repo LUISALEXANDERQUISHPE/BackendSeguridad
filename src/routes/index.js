@@ -6,6 +6,7 @@ const projectRoutes = require('./projectRoutes');
 const invitationRoutes = require('./invitationRoutes');
 const commentRoutes = require('./commentRoutes');
 const secureRoutes = require('./secureRoutes');
+const templateRoutes = require('./templateRoutes');
 
 // Rutas de autenticación
 router.use('/auth', authRoutes);
@@ -15,6 +16,9 @@ router.use('/documents', documentRoutes);
 
 // Rutas de gestión de proyectos
 router.use('/projects', projectRoutes);
+
+// HU-16: catálogo de plantillas LaTeX del sistema (solo lectura)
+router.use('/templates', templateRoutes);
 
 // HU-25: invitaciones recibidas por el usuario
 router.use('/invitations', invitationRoutes);

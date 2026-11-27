@@ -1,0 +1,9 @@
+{
+  "id": "c0be883f-f1c5-4ed0-ab30-cdd719644a0d",
+  "name": "Carta formal",
+  "category": "carta",
+  "description": "Carta formal u oficio con remitente, destinatario, asunto, cuerpo y firma.",
+  "mainFile": "main.tex",
+  "tags": ["carta", "oficio", "solicitud", "formal"],
+  "order": 13
+}

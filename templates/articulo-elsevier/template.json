@@ -1,0 +1,9 @@
+{
+  "id": "f7c750a6-5de0-43c0-a015-ffac5d504c3d",
+  "name": "Artículo Elsevier",
+  "category": "articulo",
+  "description": "Clase oficial elsarticle para enviar manuscritos a revistas de Elsevier: front matter con afiliaciones, highlights, resumen y referencias numéricas.",
+  "mainFile": "main.tex",
+  "tags": ["Elsevier", "elsarticle", "revista", "manuscrito", "bibtex"],
+  "order": 5
+}

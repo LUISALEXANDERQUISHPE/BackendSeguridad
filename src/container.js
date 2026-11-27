@@ -11,6 +11,9 @@ const { createMemberService } = require('./services/memberService');
 const { emitAccessChanged, emitCommentsChanged } = require('./realtime/accessEvents');
 const commentRepository = require('./repositories/commentRepository');
 const { createCommentService } = require('./services/commentService');
+const templateFileRepository = require('./repositories/templateFileRepository');
+const templateRepository = require('./repositories/templateRepository');
+const { createTemplateService } = require('./services/templateService');
 
 /**
  * Raíz de composición: único lugar donde se conectan las implementaciones concretas
@@ -49,7 +52,15 @@ const commentService = createCommentService({
   onCommentsChanged: emitCommentsChanged
 });
 
+// HU-16: plantillas LaTeX del sistema (solo lectura; usarlas crea una copia como proyecto nuevo)
+const templateService = createTemplateService({
+  files: templateFileRepository,
+  catalog: templateRepository,
+  logger
+});
+
 module.exports = {
+  templateService,
   versionService,
   invitationService,
   memberService,
