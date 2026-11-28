@@ -9,6 +9,7 @@ const { isTextFile } = require('../utils/fileTypes');
 const { PROJECT_LIMITS, PROJECT_ROLES } = require('../constants/projectConstants');
 const { can, PROJECT_ACTIONS } = require('../constants/permissions');
 const { CollabRoom } = require('./collabRoom');
+const { buildProjectPresence } = require('./projectPresence');
 const userNotifier = require('./userNotifier');
 const { accessEvents, ACCESS_CHANGED, COMMENTS_CHANGED } = require('./accessEvents');
 
@@ -119,9 +120,34 @@ function createRoomRegistry() {
   const closing = new Map();
   /** @type {Map<string, string>} archivo -> proyecto, para aplicar cambios de acceso por proyecto */
   const projectOfRoom = new Map();
+  /** @type {Map<string, string>} archivo -> nombre, para mostrar qué archivo tiene abierto cada colaborador */
+  const nameOfRoom = new Map();
+
+  /** Salas abiertas (ya creadas) de un proyecto. */
+  async function roomsOfProject(projectId) {
+    const ids = [...projectOfRoom].filter(([, project]) => project === projectId).map(([documentId]) => documentId);
+    const loaded = await Promise.all(ids.map((id) => rooms.get(id)?.catch(() => null)));
+    return loaded.filter(Boolean);
+  }
+
+  /**
+   * Envía a todas las salas del proyecto quién está conectado (en cualquiera de sus archivos):
+   * son los avatares junto al botón "Compartir".
+   */
+  async function broadcastProjectPresence(projectId) {
+    if (!projectId) return;
+    const projectRooms = await roomsOfProject(projectId);
+    const users = buildProjectPresence(projectRooms.map((room) => ({
+      documentId: room.documentId,
+      documentName: nameOfRoom.get(room.documentId) || '',
+      clients: room.presence()
+    })));
+    for (const room of projectRooms) room.broadcast({ type: 'project-presence', users });
+  }
 
   async function acquire(node) {
     await closing.get(node.id);
+    nameOfRoom.set(node.id, node.nombre);
 
     if (!rooms.has(node.id)) {
       projectOfRoom.set(node.id, node.proyecto_id);
@@ -145,11 +171,15 @@ function createRoomRegistry() {
   }
 
   function release(room, socket) {
+    const projectId = projectOfRoom.get(room.documentId);
     room.leave(socket);
+    // Los demás colaboradores del proyecto dejan de ver a quien se fue
+    broadcastProjectPresence(projectId).catch((error) => logger.warn('[collab] No se pudo actualizar la presencia:', error.message));
     if (room.size > 0 || closing.has(room.documentId)) return;
 
     rooms.delete(room.documentId);
     projectOfRoom.delete(room.documentId);
+    nameOfRoom.delete(room.documentId);
     const done = room.close()
       .catch((error) => logger.warn('[collab] Error al cerrar la sala:', error.message))
       .finally(() => closing.delete(room.documentId));
@@ -181,6 +211,8 @@ function createRoomRegistry() {
         room.setUserAccess(userId, can(role, PROJECT_ACTIONS.EDIT_CONTENT));
       }
     }
+    // El "(solo lectura)" del avatar cambia junto con el rol
+    if (can(role, PROJECT_ACTIONS.VIEW)) await broadcastProjectPresence(projectId);
   }
 
   /** Avisa a quienes tienen el archivo abierto (si hay sala) que sus comentarios cambiaron. */
@@ -189,7 +221,7 @@ function createRoomRegistry() {
     room?.broadcast(payload);
   }
 
-  return { acquire, release, closeAll, applyAccessChange, broadcastToDocument };
+  return { acquire, release, closeAll, applyAccessChange, broadcastToDocument, broadcastProjectPresence };
 }
 
 /**
@@ -282,6 +314,10 @@ function attachCollabServer(httpServer) {
         clearTimeout(joinTimer);
         room = acquired;
         room.join(socket, { userId: user.id, name, canEdit: can(role, PROJECT_ACTIONS.EDIT_CONTENT) });
+        // Todos en el proyecto (en cualquier archivo) ven que esta persona se conectó.
+        // Es secundario: si falla, la edición sigue funcionando
+        registry.broadcastProjectPresence(node.proyecto_id)
+          .catch((error) => logger.warn('[collab] No se pudo actualizar la presencia:', error.message));
       } catch (error) {
         clearTimeout(joinTimer);
         if (error instanceof CollabAccessError) {
