@@ -14,8 +14,21 @@ const config = require('../config');
  * @param {string} context Fragmento de contexto del log
  * @returns {string|null} Mensaje amigable o null
  */
-function getFriendlyMessage(message, context = '') {
+function getFriendlyMessage(message, context = '', fileName = '') {
   const combined = `${message} ${context}`.toLowerCase();
+
+  // 0. Errores dentro del .bbl: bibtex copia los campos del .bib tal cual, así que el fallo está en el .bib
+  if (/\.bbl$/i.test(fileName)) {
+    if (/misplaced alignment tab character &/i.test(combined)) {
+      return 'Una entrada de tu archivo .bib tiene un "&" sin escapar (por ejemplo en journal = {Computer Standards & Interfaces}). En LaTeX "&" solo sirve para separar columnas de tablas: cámbialo por "\\&" en el .bib. El texto que aparece abajo indica la entrada afectada. El PDF se genera igual, pero esa referencia puede verse mal hasta que lo corrijas.';
+    }
+    return 'El error está en la bibliografía generada desde tu archivo .bib. Busca en el .bib la entrada con el texto que aparece abajo y revisa caracteres especiales sin escapar (& % $ # _ { }), que deben escribirse como \\& \\% \\$ \\# \\_.';
+  }
+
+  // 0b. "&" fuera de una tabla
+  if (/misplaced alignment tab character &/i.test(combined)) {
+    return 'Hay un "&" fuera de una tabla o entorno de alineación. Si querías escribir el símbolo, usa "\\&".';
+  }
 
   // 1. Error: Misplaced \noalign (típico de \hline mal ubicado, falta de \\ o fuera de tabular)
   if (/misplaced\s*\\noalign/.test(combined) || /\\noalign/.test(combined)) {
@@ -205,7 +218,7 @@ function parseLatexLog(logContent, defaultFileName = 'document.tex', rootDir = n
 
       const fileName = toProjectRelativePath(filePath, rootDir);
       const contextText = contextItems.length > 0 ? contextItems.join('\n') : null;
-      const friendly = getFriendlyMessage(message, contextText || '');
+      const friendly = getFriendlyMessage(message, contextText || '', fileName);
 
       const key = `${fileName}:${lineNum}:${message}`;
       if (!seenErrors.has(key)) {
@@ -485,13 +498,14 @@ async function compileProject(files, mainFilePath, options = {}) {
 
     // -no-shell-escape: Bloquea \write18 y cualquier ejecución de comandos del sistema
     // -interaction=nonstopmode: Evita bloqueos en espera de entrada de usuario
-    // -halt-on-error: Se detiene inmediatamente si encuentra un error grave
+    // Sin -halt-on-error, como Overleaf: ante errores recuperables (un "&" suelto en el .bib, un comando
+    // desconocido...) TeX sigue, genera el PDF y los errores se muestran igual en el registro.
+    // Los errores fatales siguen deteniendo la compilación y el tiempo límite evita bucles infinitos.
     // -file-line-error: Formatea los errores como archivo:línea:mensaje
     // --disable-installer: Evita que MiKTeX intente mostrar ventanas emergentes GUI en Windows
     // --max-print-line: Equivalente de max_print_line para MiKTeX
     const engineArgs = [
       '-interaction=nonstopmode',
-      '-halt-on-error',
       '-file-line-error',
       ...(process.platform === 'win32' ? ['--disable-installer', '--max-print-line=10000'] : []),
       '-no-shell-escape',
@@ -515,12 +529,14 @@ async function compileProject(files, mainFilePath, options = {}) {
     // Pasada 1
     await runEngine();
 
-    if (compilationExitCode === 0 && !isTimedOut) {
+    // Como Overleaf: aunque la pasada tenga errores, si se generó el .aux se sigue con bibliografía y pasadas extra
+    const auxPath = path.join(workDir, `${jobName}.aux`);
+    if (!isTimedOut && fs.existsSync(auxPath)) {
       let ranAuxTool = false;
 
       // Bibliografía: biblatex+biber genera .bcf; natbib/bibtex o biblatex con backend=bibtex escriben \bibdata en el .aux
       const bcfPath = path.join(workDir, `${jobName}.bcf`);
-      const auxContent = (await readIfExists(path.join(workDir, `${jobName}.aux`))) || '';
+      const auxContent = (await readIfExists(auxPath)) || '';
       if (fs.existsSync(bcfPath) && !/\\bibdata\{/.test(auxContent)) {
         const result = await runTool('biber', [jobName], { cwd: workDir, env, timeoutMs: remaining() });
         toolsOutput += `\n===== biber =====\n${result.stdout}${result.stderr}`;
@@ -557,7 +573,7 @@ async function compileProject(files, mainFilePath, options = {}) {
       // Pasadas adicionales para resolver citas, referencias cruzadas (\ref, \pageref) y tabla de contenidos
       // (con bibliografía/índice siempre dos pasadas más; si no, solo mientras LaTeX pida recompilar)
       let extraPasses = 0;
-      while (!isTimedOut && compilationExitCode === 0 && extraPasses < 3) {
+      while (!isTimedOut && extraPasses < 3) {
         const mustRun = (ranAuxTool && extraPasses < 2) || needsRerun();
         if (!mustRun) break;
         await runEngine();
@@ -584,7 +600,8 @@ async function compileProject(files, mainFilePath, options = {}) {
 
     const pdfFilePath = path.join(workDir, `${jobName}.pdf`);
     const pdfGenerated = fs.existsSync(pdfFilePath);
-    const success = pdfGenerated && compilationExitCode === 0 && !isTimedOut;
+    // Como Overleaf: si hay PDF se muestra, aunque el registro tenga errores (se listan igual en la consola)
+    const success = pdfGenerated && !isTimedOut;
     // El PDF se devuelve en memoria: quien compila decide cómo guardarlo (cifrado con la llave del proyecto).
     // Nunca queda una copia en claro fuera del directorio temporal, que se borra al terminar.
     const pdfBuffer = success ? await fsp.readFile(pdfFilePath) : null;
