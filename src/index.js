@@ -16,6 +16,9 @@ const { getSecurity } = require('./security');
 const app = express();
 const PORT = config.port;
 
+// Detrás de un proxy inverso (Caddy en producción), req.ip toma la IP real de X-Forwarded-For
+app.set('trust proxy', config.trustProxy);
+
 // Middlewares de seguridad y utilidades
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }

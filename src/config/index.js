@@ -1,8 +1,23 @@
 // Configuración centralizada de la API
+
+/**
+ * Valor de "trust proxy" de Express: número de saltos ("1"), true/false o lista de IPs/subredes.
+ * Detrás de un proxy inverso permite que req.ip sea la IP real del cliente y no la del proxy.
+ */
+function parseTrustProxy(value) {
+  const raw = (value || '').trim();
+  if (!raw || raw === 'false') return false;
+  if (raw === 'true') return true;
+  if (/^\d+$/.test(raw)) return parseInt(raw, 10);
+  return raw;
+}
+
 module.exports = {
   port: process.env.PORT || 5000,
   nodeEnv: process.env.NODE_ENV || 'development',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  // Proxys de confianza delante del backend (ej. "1" con Caddy/Nginx). Sin definir: ninguno.
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
   supabaseUrl: process.env.SUPABASE_URL,
   supabaseSecretKey: process.env.SUPABASE_SECRET_KEY,
   storageBucket: process.env.SUPABASE_STORAGE_BUCKET || 'DocumentosSecureLeaf',

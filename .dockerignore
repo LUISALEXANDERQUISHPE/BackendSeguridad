@@ -1,0 +1,15 @@
+# Nunca copiar secretos a la imagen: el .env se entrega al contenedor en tiempo de ejecución
+.env
+.env.*
+
+.git
+.gitignore
+node_modules
+coverage
+test
+supabase
+*.md
+!templates/**/*.md
+Dockerfile
+docker-compose.yml
+.dockerignore

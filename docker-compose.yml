@@ -1,0 +1,58 @@
+# Despliegue completo de SecureLeaf en un solo servidor.
+#
+# Estructura esperada en el servidor (los dos repos uno al lado del otro):
+#   ~/secureleaf/BackendSeguridad    <- este archivo y su .env
+#   ~/secureleaf/SeguridadFrontend   <- su .env
+#
+# Uso:  docker compose up -d --build
+# Local: con DOMAIN=localhost en el .env, abre https://localhost
+# Guía completa: DESPLIEGUE.md
+
+services:
+  backend:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      # Origen permitido para la API y el WebSocket de colaboración: siempre el dominio publicado
+      # (reemplaza al CORS_ORIGIN del .env, que solo se usa con npm run dev)
+      CORS_ORIGIN: https://${DOMAIN:?Define DOMAIN en el .env (localhost o tu dominio)}
+      # Caddy está delante: confiar en un salto de proxy para obtener la IP real (req.ip)
+      TRUST_PROXY: "1"
+    # Las compilaciones LaTeX se hacen en memoria (tmpfs): más rápidas y sin copias en disco
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    # Sin puertos publicados: solo Caddy puede hablar con el backend
+    expose:
+      - "5000"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  web:
+    build: ../SeguridadFrontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      # Se leen del .env de este repo
+      DOMAIN: ${DOMAIN:?Define DOMAIN en el .env (localhost o tu dominio)}
+      SUPABASE_ORIGIN: ${SUPABASE_URL:?Define SUPABASE_URL en el .env}
+    volumes:
+      # Certificados HTTPS: deben persistir para no pedir uno nuevo en cada reinicio
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  caddy_data:
+  caddy_config:
