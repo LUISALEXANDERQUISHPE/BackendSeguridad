@@ -12,6 +12,8 @@ const { CollabRoom } = require('./collabRoom');
 const { buildProjectPresence } = require('./projectPresence');
 const userNotifier = require('./userNotifier');
 const { accessEvents, ACCESS_CHANGED, COMMENTS_CHANGED } = require('./accessEvents');
+const { openSecureChannel } = require('./secureChannel');
+const { getSecurity } = require('../security');
 
 const COLLAB_PATH = '/api/collab';
 // Tiempo máximo para que el cliente se identifique después de conectarse
@@ -235,6 +237,9 @@ function createRoomRegistry() {
  *
  * El token viaja en el primer mensaje y no en la URL para que no quede registrado en logs de proxies.
  *
+ * Todos los mensajes viajan cifrados con ChaCha20 (ver secureChannel.js): la conexión se abre con
+ * ?sid=<sesión cifrada>&cid=<conexión> y la sala y los avisos reciben un canal que cifra al enviar.
+ *
  * @param {import('http').Server} httpServer
  */
 function attachCollabServer(httpServer) {
@@ -249,9 +254,13 @@ function attachCollabServer(httpServer) {
     verifyClient: ({ origin }) => !origin || allowedOrigins.has(origin)
   });
 
-  wss.on('connection', (socket) => {
-    socket.isAlive = true;
-    socket.on('pong', () => { socket.isAlive = true; });
+  wss.on('connection', (rawSocket, request) => {
+    rawSocket.isAlive = true;
+    rawSocket.on('pong', () => { rawSocket.isAlive = true; });
+
+    // La sala y los avisos usan el canal cifrado: todo lo que envían sale cifrado con ChaCha20
+    const socket = openSecureChannel(rawSocket, request.url, getSecurity().sessionStore);
+    if (!socket) return;
 
     let room = null;
     let joining = false;
@@ -261,11 +270,10 @@ function attachCollabServer(httpServer) {
       if (!room && !subscribedUserId) socket.close(CLOSE_CODES.TIMEOUT, 'Tiempo de espera agotado');
     }, JOIN_TIMEOUT_MS);
 
-    socket.on('message', async (raw, isBinary) => {
+    rawSocket.on('message', async (raw, isBinary) => {
       let message;
       try {
-        if (isBinary) throw new Error('binario');
-        message = JSON.parse(raw.toString());
+        message = JSON.parse(socket.decrypt(raw, isBinary));
       } catch {
         socket.close(CLOSE_CODES.INVALID_MESSAGE, 'Mensaje inválido');
         return;
@@ -329,7 +337,7 @@ function attachCollabServer(httpServer) {
       }
     });
 
-    socket.on('close', () => {
+    rawSocket.on('close', () => {
       clearTimeout(joinTimer);
       if (room) registry.release(room, socket);
       if (subscribedUserId) userNotifier.unsubscribe(subscribedUserId, socket);
@@ -337,7 +345,7 @@ function attachCollabServer(httpServer) {
       subscribedUserId = null;
     });
 
-    socket.on('error', (error) => logger.warn('[collab] Error de conexión:', error.message));
+    rawSocket.on('error', (error) => logger.warn('[collab] Error de conexión:', error.message));
   });
 
   // Ping periódico: las conexiones que no responden se cierran y liberan su sala

@@ -234,13 +234,6 @@ function createProjectRepository(db) {
       return firstByProject(compilations);
     },
 
-    async findCompilationIds(projectId) {
-      const rows = unwrap(
-        await db.from('compilaciones').select('id').eq('proyecto_id', projectId)
-      ) || [];
-      return rows.map(row => row.id);
-    },
-
     /**
      * Perfil público de los usuarios indicados.
      * @param {string[]} userIds

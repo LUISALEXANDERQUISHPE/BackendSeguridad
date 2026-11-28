@@ -1,6 +1,5 @@
 const crypto = require('crypto');
 const path = require('path');
-const fs = require('fs');
 const supabase = require('../config/supabase');
 const latexService = require('../services/latexService');
 const storageService = require('../services/storageService');
@@ -107,7 +106,7 @@ async function relocateNodeFile(node, newPath) {
   if (oldPath === newPath) return;
 
   if (isTextFile(node.nombre) && typeof node.contenido_actual === 'string') {
-    await storageService.uploadBinary(newPath, Buffer.from(node.contenido_actual, 'utf8'), 'text/plain; charset=utf-8');
+    await storageService.uploadBinary(newPath, Buffer.from(node.contenido_actual, 'utf8'));
     if (oldPath) await storageService.removeFiles([oldPath]).catch(() => {});
   } else if (oldPath) {
     try {
@@ -116,7 +115,7 @@ async function relocateNodeFile(node, newPath) {
       // El objeto no estaba en la ruta registrada: si se puede leer, copiarlo; si no, solo se actualiza la ruta
       const data = await storageService.downloadFile(oldPath);
       if (data) {
-        await storageService.uploadBinary(newPath, data, getMimeType(node.nombre));
+        await storageService.uploadBinary(newPath, data);
         await storageService.removeFiles([oldPath]).catch(() => {});
       } else {
         console.warn(`Advertencia: el archivo ${oldPath} no existe en Storage (${err.message})`);
@@ -397,7 +396,7 @@ exports.listProjectTree = async (req, res, next) => {
 
 exports.createProjectNode = async (req, res, next) => {
   try {
-    const { name, nodeType = 'archivo', parentId = null, content = '', dataBase64, mimeType } = req.body;
+    const { name, nodeType = 'archivo', parentId = null, content = '', dataBase64 } = req.body;
     const access = await resolveProjectAccess(req.params.projectId, req.user.id);
     if (access.error) return res.status(access.status).json({ error: access.error });
     if (!canEdit(access.role)) return res.status(403).json({ error: 'No tienes permisos para modificar este proyecto' });
@@ -442,7 +441,7 @@ exports.createProjectNode = async (req, res, next) => {
     }).select('*').single();
     if (error) throw error;
     if (nodeType === 'archivo') {
-      await storageService.uploadBinary(storagePath, buffer, isText ? 'text/plain; charset=utf-8' : (mimeType || getMimeType(cleanName)));
+      await storageService.uploadBinary(storagePath, buffer);
     }
     return res.status(201).json({ node });
   } catch (error) {
@@ -1040,6 +1039,18 @@ exports.compileDocument = async (req, res, next) => {
     // Ejecutar compilación segura
     const result = await latexService.compileProject(projectFiles, mainFilePath, { compilationId });
 
+    // El PDF se guarda solo en Supabase Storage, cifrado con la llave del proyecto (no queda copia en el servidor)
+    let pdfStoragePath = null;
+    let pdfSaveError = null;
+    if (result.success && result.pdfBuffer) {
+      try {
+        pdfStoragePath = await storageService.uploadPdf(mainNode, result.pdfBuffer);
+      } catch (err) {
+        pdfSaveError = err;
+        console.warn('Advertencia al subir el PDF a Storage:', err.message);
+      }
+    }
+
     // Actualizar registro en base de datos
     const compilationStatus = result.success ? 'exitosa' : 'error';
     await supabase
@@ -1047,18 +1058,14 @@ exports.compileDocument = async (req, res, next) => {
       .update({
         estado: compilationStatus,
         log_salida: result.log,
-        pdf_output_path: result.pdfPath ? path.basename(result.pdfPath) : null,
+        pdf_output_path: pdfStoragePath,
         finalizado_en: new Date().toISOString()
       })
       .eq('id', compilationId);
 
-    // Guardar el PDF generado en Supabase Storage (el archivo local sigue siendo la copia rápida)
-    if (result.success && result.pdfPath) {
-      try {
-        await storageService.uploadPdf(mainNode, result.pdfPath);
-      } catch (err) {
-        console.warn('Advertencia al subir el PDF a Storage:', err.message);
-      }
+    // Compiló bien pero el PDF no se pudo guardar: sin él no hay nada que mostrar
+    if (pdfSaveError) {
+      return res.status(502).json({ error: 'El PDF se generó pero no se pudo guardar. Intenta compilar de nuevo.' });
     }
 
     const pdfUrl = result.success ? `/api/documents/${node.id}/pdf` : null;
@@ -1117,8 +1124,6 @@ exports.getPdf = async (req, res, next) => {
       });
     }
 
-    const pdfPath = latexService.getCompiledPdfPath(compilation.id);
-    const hasLocalPdf = !!pdfPath && fs.existsSync(pdfPath);
 
     // El PDF lleva el nombre del archivo principal que se compiló (puede no ser el archivo abierto)
     let mainNode = node;
@@ -1131,12 +1136,10 @@ exports.getPdf = async (req, res, next) => {
       if (compiledNode) mainNode = compiledNode;
     }
 
-    // Si el PDF local ya no existe (otro servidor, disco limpiado), recuperarlo de Supabase Storage
-    const storedPdf = hasLocalPdf
-      ? null
-      : await storageService.downloadFile(storageService.getPdfPath(mainNode));
+    // El PDF está en Supabase Storage, cifrado: se descarga y descifra con la llave del proyecto
+    const pdfBuffer = await storageService.downloadFile(storageService.getPdfPath(mainNode));
 
-    if (!hasLocalPdf && !storedPdf) {
+    if (!pdfBuffer) {
       return res.status(404).json({
         error: 'El archivo PDF generado ya no se encuentra en el almacenamiento. Por favor compila de nuevo.'
       });
@@ -1148,8 +1151,7 @@ exports.getPdf = async (req, res, next) => {
       fileName: `${baseName}.pdf`,
       contentType: 'application/pdf',
       disposition: isDownload ? 'attachment' : 'inline',
-      buffer: storedPdf,
-      filePath: pdfPath
+      buffer: pdfBuffer
     });
 
   } catch (error) {
