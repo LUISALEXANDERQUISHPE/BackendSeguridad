@@ -37,6 +37,11 @@ function createVersionRepository(db) {
       return { rows: data || [], total: count || 0 };
     },
 
+    /**
+     * Versión N de un archivo. La migración 003 hace que el número sea único por archivo; aun así,
+     * si una base de datos no la tiene aplicada y quedaron números repetidos (dos guardados en el
+     * mismo segundo), se devuelve la más reciente en lugar de fallar con PGRST116 ("2 rows").
+     */
     async findVersion(fileId, number) {
       return unwrap(
         await db
@@ -44,6 +49,9 @@ function createVersionRepository(db) {
           .select(VERSION_COLUMNS)
           .eq('archivo_id', fileId)
           .eq('numero_version', number)
+          .order('creado_en', { ascending: false })
+          .order('id', { ascending: false })
+          .limit(1)
           .maybeSingle()
       );
     },
@@ -55,6 +63,8 @@ function createVersionRepository(db) {
           .select(VERSION_COLUMNS)
           .eq('archivo_id', fileId)
           .order('numero_version', { ascending: false })
+          // Desempate si hubiera números repetidos: siempre la más reciente
+          .order('creado_en', { ascending: false })
           .limit(1)
           .maybeSingle()
       );
