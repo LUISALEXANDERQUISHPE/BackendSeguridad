@@ -19,6 +19,7 @@ const {
 } = require('./projectCloneBuilder');
 const { createProjectAccessService } = require('./projectAccessService');
 const { buildTemplateCopy } = require('./templateProjectBuilder');
+const { prepareZipImport, projectNameFromFile } = require('./zipImport');
 
 // Autocompletado de correos al compartir: límites que dificultan enumerar usuarios
 const SHARE_SUGGESTIONS = Object.freeze({
@@ -247,6 +248,29 @@ function createProjectService({ repository, storage, logger, notifier = null, te
   }
 
   /**
+   * IMPORTAR un proyecto desde un .zip (como "Subir proyecto en Zip" de Overleaf).
+   * Respeta las carpetas del .zip; el .tex principal de la raíz queda como archivo principal.
+   * Si algo falla a mitad de camino, el proyecto se revierte (no queda a medio crear).
+   */
+  async function importProjectFromZip(userId, { name, fileName, dataBase64 } = {}) {
+    const { files, mainFile } = prepareZipImport(dataBase64);
+    const nombre = validateName(name ?? projectNameFromFile(fileName));
+    const projectData = { nombre, descripcion: validateDescription('') };
+
+    const { project, mainNode } = await createWithRollback(projectData, userId, async created => {
+      const copy = buildTemplateCopy({ files, mainFile, projectId: created.id, userId });
+      const inserted = await repository.insertNodes([...copy.folders, ...copy.files]);
+      await repository.insertVersions(
+        buildInitialVersions(copy.files, userId, 'Proyecto importado desde un .zip')
+      );
+      await uploadTemplateFiles(copy.uploads, created.id);
+      return inserted.find(node => node.id === copy.mainNodeId) ?? null;
+    });
+
+    return toProjectDto(project, { role: PROJECT_ROLES.OWNER, mainNode });
+  }
+
+  /**
    * Si el archivo principal llevaba el nombre anterior del proyecto, lo renombra también.
    * @returns {Promise<object|undefined>} Nodo principal vigente
    */
@@ -425,6 +449,7 @@ function createProjectService({ repository, storage, logger, notifier = null, te
     getProject,
     createProject,
     createProjectFromTemplate,
+    importProjectFromZip,
     updateProject,
     setArchived,
     duplicateProject,
