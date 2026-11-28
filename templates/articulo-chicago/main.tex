@@ -1,0 +1,46 @@
+% ============================================================
+% Plantilla: Artículo con el Manual de Estilo de Chicago (autor-fecha)
+%   \autocite{clave}         -> (Autor año)
+%   \autocite[45]{clave}     -> (Autor año, 45)
+%   \textcite{clave}         -> Autor (año)
+% Recompilar ejecuta biber automáticamente.
+% ============================================================
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{mathptmx}
+\usepackage[spanish]{babel}
+\usepackage[margin=2.54cm]{geometry}
+\usepackage{setspace}
+\usepackage{csquotes}
+\usepackage[authordate,backend=biber]{biblatex-chicago}
+\usepackage[hidelinks]{hyperref}
+
+\addbibresource{referencias.bib}
+\doublespacing
+
+\title{Título del artículo}
+\author{Nombre del Autor\\\small Universidad}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Introducción}
+El sistema autor-fecha de Chicago es habitual en ciencias sociales
+\autocite{chicago2017}. Para citar una página concreta se indica después del año
+\autocite[45]{lamport1994}. También puede citarse en la narración: según
+\textcite{knuth1984}, la tipografía influye en la lectura.
+
+\section{Desarrollo}
+Desarrolla los argumentos principales con el respaldo de las fuentes
+\autocite{goossens2004}.
+
+\section{Conclusiones}
+Resume las ideas principales.
+
+\printbibliography[title=Referencias]
+
+\end{document}

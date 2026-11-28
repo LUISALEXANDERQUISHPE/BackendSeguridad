@@ -1,0 +1,55 @@
+% ============================================================
+% Plantilla: Ensayo con normas MLA 9.ª edición
+%   \autocite[45]{clave} -> (Autor 45)
+% Recompilar ejecuta biber automáticamente.
+% ============================================================
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{mathptmx}
+\usepackage[spanish]{babel}
+\usepackage[margin=2.54cm,headheight=15pt]{geometry}
+\usepackage{setspace}
+\usepackage{csquotes}
+\usepackage[style=mla,backend=biber]{biblatex}
+\usepackage[hidelinks]{hyperref}
+
+\addbibresource{referencias.bib}
+\doublespacing
+\setlength{\parindent}{1.27cm}
+
+% MLA: apellido del autor y número de página arriba a la derecha
+\newcommand{\apellido}{Apellido}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[R]{\apellido\ \thepage}
+\renewcommand{\headrulewidth}{0pt}
+
+\begin{document}
+
+% ---------- Encabezado del estudiante (sin portada) ----------
+\noindent Nombre Apellido\\
+Nombre del Docente\\
+Nombre de la Asignatura\\
+\today
+
+\begin{center}
+  Título del Ensayo
+\end{center}
+
+El ensayo comienza aquí. En MLA las citas indican el autor y la página, por ejemplo
+\autocite[12]{lamport1994}. Si el autor ya se menciona en el texto, como Knuth, basta
+con la página \autocite[45]{knuth1984}.
+
+Cada párrafo desarrolla una idea que apoya la tesis del ensayo y la respalda con
+fuentes \autocite[3]{mla2021}.
+
+En la conclusión se retoma la tesis y se resumen los argumentos principales
+\autocite[102]{goossens2004}.
+
+\newpage
+\printbibliography[title=Obras citadas]
+
+\end{document}

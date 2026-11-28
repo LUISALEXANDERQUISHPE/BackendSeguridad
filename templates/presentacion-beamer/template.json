@@ -1,0 +1,9 @@
+{
+  "id": "232f41c1-6f02-4a66-9208-11ba5f11aeed",
+  "name": "Presentación Beamer",
+  "category": "presentacion",
+  "description": "Diapositivas en formato 16:9 con portada, agenda, columnas, bloques, ecuaciones y diapositiva de cierre.",
+  "mainFile": "main.tex",
+  "tags": ["presentación", "diapositivas", "beamer", "defensa", "exposición"],
+  "order": 12
+}

@@ -1,0 +1,63 @@
+% ============================================================
+% Plantilla: Currículum vitae (una página)
+% ============================================================
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[spanish]{babel}
+\usepackage[margin=1.8cm]{geometry}
+\usepackage{xcolor}
+\usepackage{tabularx}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{acento}{RGB}{19,128,79}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+
+% Título de sección con línea de color
+\newcommand{\seccion}[1]{%
+  \vspace{10pt}{\large\bfseries\color{acento}#1}\par
+  \vspace{2pt}{\color{acento}\rule{\linewidth}{0.8pt}}\par\vspace{4pt}}
+
+% Entrada: \entrada{Puesto o título}{Fechas}{Lugar}{Descripción}
+\newcommand{\entrada}[4]{%
+  \textbf{#1} \hfill {\small #2}\par
+  {\itshape #3}\par
+  {\small #4}\par\vspace{6pt}}
+
+\begin{document}
+
+\begin{center}
+  {\Huge\bfseries Nombre Apellido}\par\vspace{4pt}
+  {\large Ingeniero de Software}\par\vspace{6pt}
+  {\small Ciudad, País \;|\; +593 000 000 000 \;|\; \href{mailto:correo@ejemplo.com}{correo@ejemplo.com}
+  \;|\; \href{https://github.com/usuario}{github.com/usuario}}
+\end{center}
+
+\seccion{Perfil}
+Profesional orientado a resultados, con experiencia en desarrollo web, seguridad de la
+información y trabajo en equipos ágiles.
+
+\seccion{Experiencia}
+\entrada{Desarrollador Full Stack}{2024 -- Actualidad}{Empresa Ejemplo S.A.}{%
+  Desarrollo de aplicaciones web con React y Node.js; integración continua y pruebas automatizadas.}
+\entrada{Practicante de Desarrollo}{2023}{Institución Ejemplo}{%
+  Mantenimiento de sistemas internos y documentación técnica.}
+
+\seccion{Educación}
+\entrada{Ingeniería en Software}{2020 -- 2025}{Nombre de la Universidad}{%
+  Trabajo de titulación: título del trabajo.}
+
+\seccion{Habilidades}
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+  \textbf{Lenguajes:} & JavaScript, TypeScript, Python, SQL \\
+  \textbf{Herramientas:} & Git, Docker, Supabase, \LaTeX \\
+  \textbf{Metodologías:} & Scrum, principios SOLID, pruebas unitarias \\
+\end{tabularx}
+
+\seccion{Idiomas}
+Español (nativo) \;\textbullet\; Inglés (intermedio B2)
+
+\end{document}

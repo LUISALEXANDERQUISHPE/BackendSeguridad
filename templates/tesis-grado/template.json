@@ -1,0 +1,9 @@
+{
+  "id": "e63e0b09-ffca-41af-b88e-68229fb8166c",
+  "name": "Tesis de grado",
+  "category": "tesis",
+  "description": "Trabajo de titulación con portada, resumen, índices, capítulos en archivos separados y bibliografía con BibTeX.",
+  "mainFile": "main.tex",
+  "tags": ["tesis", "titulación", "universidad", "capítulos", "bibtex"],
+  "order": 1
+}

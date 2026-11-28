@@ -1,0 +1,85 @@
+% ============================================================
+% Plantilla: Artículo IEEE para revistas (clase IEEEtran, modo journal)
+% Citas numéricas: \cite{clave} -> [1]. Compila con pdflatex + bibtex.
+% ============================================================
+\documentclass[journal]{IEEEtran}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-tabla]{babel}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+
+% IEEEtran no traduce este título con babel
+\renewcommand{\IEEEkeywordsname}{Palabras clave}
+
+\begin{document}
+
+\title{Título del Artículo para la Revista IEEE}
+
+\author{Primer~Autor,~\IEEEmembership{Miembro,~IEEE,}
+  y~Segundo~Autor%
+  \thanks{P. Autor pertenece al Departamento de Ingeniería, Universidad, Ciudad, País
+    (correo: autor@ejemplo.com).}%
+  \thanks{Manuscrito recibido el 1 de enero de 2026.}}
+
+\markboth{Revista IEEE de Ejemplo,~Vol.~1, No.~1, enero~2026}%
+{Autor \MakeLowercase{\textit{et al.}}: Título abreviado del artículo}
+
+\maketitle
+
+\begin{abstract}
+Resume en un solo párrafo el problema, el método propuesto, los resultados principales
+y su relevancia (máximo 250 palabras).
+\end{abstract}
+
+\begin{IEEEkeywords}
+Palabra clave uno, palabra clave dos, palabra clave tres.
+\end{IEEEkeywords}
+
+\section{Introducción}
+\IEEEPARstart{E}{sta} plantilla sigue el formato de las revistas IEEE. La primera letra
+del artículo se destaca con \texttt{\textbackslash IEEEPARstart}. Las referencias se
+numeran en orden de aparición \cite{lamport1994}.
+
+\section{Trabajos relacionados}
+Resume el estado del arte \cite{knuth1984,goossens2004}.
+
+\section{Método propuesto}
+El modelo se define como:
+\begin{equation}
+  y = \mathbf{W}x + b
+  \label{eq:modelo}
+\end{equation}
+donde $\mathbf{W}$ es la matriz de pesos y $b$ el sesgo.
+
+\section{Resultados}
+La Tabla~\ref{tab:resultados} compara el método propuesto, basado en~\eqref{eq:modelo}.
+
+\begin{table}[!t]
+  \caption{Comparación de métodos}
+  \label{tab:resultados}
+  \centering
+  \begin{tabular}{lcc}
+    \toprule
+    Método & Exactitud & F1 \\
+    \midrule
+    Referencia & 0.84 & 0.81 \\
+    Propuesto & \textbf{0.91} & \textbf{0.89} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Conclusiones}
+Resume las contribuciones y el trabajo futuro.
+
+\bibliographystyle{IEEEtran}
+\bibliography{referencias}
+
+\begin{IEEEbiographynophoto}{Primer Autor}
+recibió el título de Ingeniero en Software de la Universidad en 2026. Sus intereses de
+investigación incluyen la seguridad de la información.
+\end{IEEEbiographynophoto}
+
+\end{document}

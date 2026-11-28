@@ -1,0 +1,9 @@
+{
+  "id": "cb4e45fe-a5c1-4bfd-9b0c-acabad4c0aa6",
+  "name": "Artículo APA 7",
+  "category": "normas",
+  "description": "Trabajo académico con normas APA 7.ª edición: portada de estudiante, doble espacio, niveles de títulos, citas (Autor, año) y referencias con sangría francesa.",
+  "mainFile": "main.tex",
+  "tags": ["APA", "APA 7", "citas", "autor-año", "universidad", "biblatex"],
+  "order": 6
+}

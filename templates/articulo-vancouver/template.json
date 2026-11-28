@@ -1,0 +1,9 @@
+{
+  "id": "0fee6074-0be0-4f44-9be5-d00203533877",
+  "name": "Artículo estilo Vancouver",
+  "category": "normas",
+  "description": "Artículo para ciencias de la salud con normas Vancouver: citas numéricas en orden de aparición y referencias según el ICMJE.",
+  "mainFile": "main.tex",
+  "tags": ["Vancouver", "medicina", "salud", "ICMJE", "citas numéricas", "biblatex"],
+  "order": 7
+}

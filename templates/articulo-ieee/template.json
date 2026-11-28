@@ -1,0 +1,9 @@
+{
+  "id": "7a0a2f6b-0d2d-42e8-b3a8-3e8884a1327d",
+  "name": "Artículo IEEE (conferencia)",
+  "category": "articulo",
+  "description": "Formato oficial IEEEtran a dos columnas para conferencias, con autores, resumen, palabras clave y referencias estilo IEEE.",
+  "mainFile": "main.tex",
+  "tags": ["IEEE", "conferencia", "dos columnas", "paper", "bibtex"],
+  "order": 3
+}

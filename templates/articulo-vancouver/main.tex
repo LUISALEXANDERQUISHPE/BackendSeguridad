@@ -1,0 +1,66 @@
+% ============================================================
+% Plantilla: Artículo con normas Vancouver (ciencias de la salud)
+% Las citas se numeran en orden de aparición: \cite{clave} -> [1]
+% Recompilar ejecuta biber automáticamente.
+% ============================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[spanish,es-tabla]{babel}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{csquotes}
+\usepackage{booktabs}
+\usepackage[style=vancouver,backend=biber]{biblatex}
+\usepackage[hidelinks]{hyperref}
+
+\addbibresource{referencias.bib}
+
+\title{Título del artículo de investigación en salud}
+\author{Primer Autor\textsuperscript{1}, Segundo Autor\textsuperscript{2}\\[0.5em]
+  \small\textsuperscript{1}Facultad de Ciencias Médicas, Universidad \quad
+  \textsuperscript{2}Hospital de Referencia}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\textbf{Objetivo:} indica el propósito del estudio.
+\textbf{Métodos:} describe el diseño, la población y el análisis.
+\textbf{Resultados:} presenta los hallazgos principales.
+\textbf{Conclusiones:} resume la implicación clínica.
+
+\medskip
+\noindent\textbf{Palabras clave:} término MeSH 1; término MeSH 2; término MeSH 3.
+\end{abstract}
+
+\section{Introducción}
+Presenta el problema de salud y los antecedentes \cite{icmje2019}. Las citas se
+numeran en el orden en que aparecen en el texto \cite{lamport1994,knuth1984}.
+
+\section{Métodos}
+Describe el diseño del estudio, los criterios de inclusión y el análisis estadístico.
+
+\section{Resultados}
+\begin{table}[htbp]
+  \centering
+  \caption{Características de los participantes (n = 120).}
+  \begin{tabular}{lc}
+    \toprule
+    Característica & Valor \\
+    \midrule
+    Edad, media (DE) & 45.2 (12.1) \\
+    Mujeres, n (\%) & 64 (53.3) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Discusión}
+Compara los resultados con estudios previos \cite{goossens2004}.
+
+\printbibliography[title=Referencias]
+
+\end{document}

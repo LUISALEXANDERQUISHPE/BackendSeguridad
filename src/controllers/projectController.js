@@ -3,6 +3,7 @@ const storageService = require('../services/storageService');
 const logger = require('../utils/logger');
 const userNotifier = require('../realtime/userNotifier');
 const { createProjectService } = require('../services/projectService');
+const { templateService } = require('../container');
 
 /**
  * Controlador HTTP de la HU-17 "Gestión de proyectos".
@@ -23,6 +24,12 @@ function createProjectController(projectService) {
 
     /** POST /api/projects */
     async createProject(req, res) {
+      // HU-16: con templateId el proyecto se crea como copia de una plantilla del sistema
+      if (req.body?.templateId) {
+        const project = await projectService.createProjectFromTemplate(req.user.id, req.body);
+        res.status(201).json({ message: 'Proyecto creado desde la plantilla', project });
+        return;
+      }
       const { project, storageSynced } = await projectService.createProject(req.user.id, req.body);
       res.status(201).json({ message: 'Proyecto creado exitosamente', project, storageSynced });
     },
@@ -82,7 +89,8 @@ const projectService = createProjectService({
   repository: projectRepository,
   storage: storageService,
   logger,
-  notifier: userNotifier
+  notifier: userNotifier,
+  templates: templateService
 });
 
 module.exports = createProjectController(projectService);

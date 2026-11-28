@@ -1,0 +1,91 @@
+% ============================================================
+% Plantilla: Informe técnico
+% ============================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[spanish,es-tabla]{babel}
+\usepackage[margin=2.5cm,headheight=14pt]{geometry}
+\usepackage{fancyhdr}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+
+% ---------- Datos del informe ----------
+\newcommand{\organizacion}{Nombre de la organización}
+\newcommand{\tituloinforme}{Informe técnico del proyecto}
+\newcommand{\codigo}{INF-001}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\organizacion}
+\fancyhead[R]{\codigo}
+\fancyfoot[C]{Página \thepage}
+
+\begin{document}
+
+\begin{titlepage}
+  \centering
+  \vspace*{3cm}
+  {\Huge\bfseries \tituloinforme\par}
+  \vspace{1cm}
+  {\Large \organizacion\par}
+  \vspace{2cm}
+  \begin{tabular}{ll}
+    \textbf{Código:} & \codigo \\
+    \textbf{Elaborado por:} & Nombre del responsable \\
+    \textbf{Fecha:} & \today \\
+  \end{tabular}
+  \vfill
+\end{titlepage}
+
+\section*{Control de versiones del documento}
+\begin{tabular}{llp{8cm}}
+  \toprule
+  Versión & Fecha & Descripción \\
+  \midrule
+  1.0 & \today & Versión inicial del informe. \\
+  \bottomrule
+\end{tabular}
+
+\tableofcontents
+\newpage
+
+\section{Objetivo}
+Describe el propósito del informe.
+
+\section{Alcance}
+Indica qué incluye y qué no incluye el trabajo reportado.
+
+\section{Desarrollo}
+\subsection{Actividades realizadas}
+\begin{enumerate}
+  \item Primera actividad.
+  \item Segunda actividad.
+\end{enumerate}
+
+\subsection{Recursos utilizados}
+\begin{table}[htbp]
+  \centering
+  \caption{Recursos utilizados.}
+  \begin{tabular}{lcr}
+    \toprule
+    Recurso & Cantidad & Costo (USD) \\
+    \midrule
+    Servidor en la nube & 1 & 40.00 \\
+    Licencias & 3 & 75.00 \\
+    \midrule
+    \textbf{Total} & & \textbf{115.00} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Conclusiones}
+Resume los hallazgos principales.
+
+\section{Recomendaciones}
+Propón las acciones a seguir.
+
+\end{document}

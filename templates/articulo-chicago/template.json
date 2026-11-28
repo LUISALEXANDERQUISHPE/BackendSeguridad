@@ -1,0 +1,9 @@
+{
+  "id": "a379a2a4-7e80-4519-b6ca-845eaba2c514",
+  "name": "Artículo estilo Chicago",
+  "category": "normas",
+  "description": "Artículo con el Manual de Estilo de Chicago (sistema autor-fecha): citas (Autor año, página) y lista de referencias.",
+  "mainFile": "main.tex",
+  "tags": ["Chicago", "autor-fecha", "historia", "ciencias sociales", "biblatex"],
+  "order": 8
+}

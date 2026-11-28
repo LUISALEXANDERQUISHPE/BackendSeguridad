@@ -1,0 +1,9 @@
+{
+  "id": "4afbfe02-639a-442d-8d3c-32fc86c7bfae",
+  "name": "Informe técnico",
+  "category": "informe",
+  "description": "Informe de proyecto o laboratorio con encabezados, control de versiones del documento, índice, tablas y listas.",
+  "mainFile": "main.tex",
+  "tags": ["informe", "reporte", "laboratorio", "proyecto"],
+  "order": 11
+}

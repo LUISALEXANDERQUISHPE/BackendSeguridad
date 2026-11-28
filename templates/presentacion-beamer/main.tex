@@ -1,0 +1,92 @@
+% ============================================================
+% Plantilla: Presentación con Beamer (16:9)
+% ============================================================
+\documentclass[aspectratio=169]{beamer}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+\usepackage{amsmath}
+\usepackage{booktabs}
+
+\usetheme{Madrid}
+\usecolortheme{seahorse}
+\setbeamertemplate{navigation symbols}{}
+
+\title[Título corto]{Título de la presentación}
+\subtitle{Subtítulo opcional}
+\author{Nombre del Expositor}
+\institute{Universidad}
+\date{\today}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+\begin{frame}{Agenda}
+  \tableofcontents
+\end{frame}
+
+\section{Introducción}
+\begin{frame}{Contexto del problema}
+  \begin{itemize}
+    \item Primer punto importante.
+    \item Segundo punto importante.
+    \pause
+    \item Este punto aparece al avanzar la diapositiva.
+  \end{itemize}
+\end{frame}
+
+\section{Propuesta}
+\begin{frame}{Propuesta en dos columnas}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \begin{block}{Ventajas}
+        \begin{itemize}
+          \item Más rápida.
+          \item Más segura.
+        \end{itemize}
+      \end{block}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{alertblock}{Limitaciones}
+        \begin{itemize}
+          \item Requiere conexión.
+        \end{itemize}
+      \end{alertblock}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Modelo matemático}
+  \begin{equation*}
+    \hat{y} = \beta_0 + \sum_{i=1}^{n} \beta_i x_i
+  \end{equation*}
+  \begin{exampleblock}{Interpretación}
+    Cada coeficiente $\beta_i$ mide el efecto de la variable $x_i$.
+  \end{exampleblock}
+\end{frame}
+
+\section{Resultados}
+\begin{frame}{Resultados}
+  \centering
+  \begin{tabular}{lcc}
+    \toprule
+    Método & Precisión & Tiempo \\
+    \midrule
+    Anterior & 81\,\% & 2.4 s \\
+    Propuesto & \textbf{89\,\%} & \textbf{1.1 s} \\
+    \bottomrule
+  \end{tabular}
+\end{frame}
+
+\begin{frame}
+  \centering
+  {\Huge ¡Gracias!}\par
+  \vspace{1em}
+  ¿Preguntas?
+\end{frame}
+
+\end{document}

@@ -1,0 +1,75 @@
+% ============================================================
+% Plantilla: Manuscrito para revistas de Elsevier (clase oficial elsarticle)
+% Opciones útiles: preprint (una columna, para enviar), review (doble espacio),
+% 1p / 3p / 5p (formatos de publicación). Compila con pdflatex + bibtex.
+% ============================================================
+\documentclass[preprint,12pt]{elsarticle}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-tabla]{babel}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+
+\journal{Nombre de la Revista}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{Título del manuscrito}
+
+\author[uni]{Primer Autor\corref{cor1}}
+\ead{autor@ejemplo.com}
+\author[uni,inst]{Segundo Autor}
+
+\cortext[cor1]{Autor de correspondencia.}
+
+\affiliation[uni]{organization={Facultad de Ingeniería, Universidad},
+  city={Ciudad}, country={País}}
+\affiliation[inst]{organization={Instituto de Investigación},
+  city={Ciudad}, country={País}}
+
+\begin{abstract}
+Resume el objetivo, la metodología, los resultados y las conclusiones del trabajo.
+\end{abstract}
+
+\begin{highlights}
+\item Primera contribución principal del trabajo.
+\item Segunda contribución principal.
+\item Tercera contribución principal.
+\end{highlights}
+
+\begin{keyword}
+palabra clave uno \sep palabra clave dos \sep palabra clave tres
+\end{keyword}
+
+\end{frontmatter}
+
+\section{Introducción}
+Presenta el problema y la contribución del manuscrito \cite{lamport1994}.
+
+\section{Materiales y métodos}
+Describe el procedimiento con detalle suficiente para reproducirlo \cite{knuth1984}.
+
+\section{Resultados}
+\begin{table}[htbp]
+  \centering
+  \caption{Resultados principales.}
+  \begin{tabular}{lcc}
+    \toprule
+    Muestra & Valor A & Valor B \\
+    \midrule
+    M1 & 12.4 & 0.81 \\
+    M2 & 15.1 & 0.87 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Conclusiones}
+Resume los hallazgos \cite{goossens2004}.
+
+\bibliographystyle{elsarticle-num}
+\bibliography{referencias}
+
+\end{document}

@@ -1,0 +1,55 @@
+% ============================================================
+% Plantilla: Tesis de grado
+% Compila con pdflatex + bibtex (Recompilar lo hace automáticamente).
+% Cada capítulo está en la carpeta "capitulos"; la bibliografía en "referencias.bib".
+% ============================================================
+\documentclass[12pt,a4paper,oneside]{report}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[spanish,es-tabla]{babel}
+\usepackage[top=3cm,bottom=2.5cm,left=3cm,right=2.5cm]{geometry}
+\usepackage{setspace}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+
+\onehalfspacing
+
+% ---------- Datos del trabajo (edítalos aquí) ----------
+\newcommand{\universidad}{Nombre de la Universidad}
+\newcommand{\facultad}{Facultad de Ingeniería}
+\newcommand{\carrera}{Carrera de Ingeniería en Software}
+\newcommand{\titulo}{Título del Trabajo de Titulación}
+\newcommand{\autor}{Nombre del Autor}
+\newcommand{\tutor}{Nombre del Tutor}
+\newcommand{\ciudad}{Ciudad}
+\newcommand{\anio}{\the\year}
+
+\begin{document}
+
+\input{capitulos/portada}
+
+\pagenumbering{roman}
+\input{capitulos/resumen}
+
+\tableofcontents
+\listoffigures
+\listoftables
+
+\cleardoublepage
+\pagenumbering{arabic}
+
+\input{capitulos/introduccion}
+\input{capitulos/marco-teorico}
+\input{capitulos/metodologia}
+\input{capitulos/resultados}
+\input{capitulos/conclusiones}
+
+\bibliographystyle{plain}
+\bibliography{referencias}
+
+\end{document}

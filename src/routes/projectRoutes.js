@@ -51,11 +51,10 @@ router.get('/', projectController.listProjects);
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - name
  *             properties:
  *               name:
  *                 type: string
+ *                 description: Requerido salvo al usar una plantilla (por defecto toma su nombre)
  *                 example: Tesis de grado
  *               description:
  *                 type: string
@@ -63,6 +62,12 @@ router.get('/', projectController.listProjects);
  *               content:
  *                 type: string
  *                 description: Código LaTeX inicial opcional; si se omite se usa la plantilla por defecto
+ *               templateId:
+ *                 type: string
+ *                 format: uuid
+ *                 description: >
+ *                   Plantilla del sistema a copiar (GET /api/templates). El proyecto se crea como copia
+ *                   independiente con todos sus archivos; el nombre y la descripción son opcionales.
  *     responses:
  *       201:
  *         description: Proyecto creado exitosamente

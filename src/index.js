@@ -5,6 +5,8 @@ const helmet = require('helmet');
 
 const config = require('./config');
 const routes = require('./routes');
+const { templateService } = require('./container');
+const logger = require('./utils/logger');
 const errorHandler = require('./middlewares/error');
 const setupSwagger = require('./config/swagger');
 const { attachCollabServer, COLLAB_PATH } = require('./realtime/collabServer');
@@ -54,6 +56,12 @@ const server = app.listen(PORT, () => {
   console.log(`📡 Local:   http://localhost:${PORT}`);
   console.log(`🤝 Colaboración en tiempo real: ws://localhost:${PORT}${COLLAB_PATH}`);
   console.log(`🌱 Ambiente: ${config.nodeEnv}\n`);
+});
+
+// HU-16: registrar en la base las plantillas del sistema. Si la base no responde, el catálogo
+// se sigue sirviendo desde la carpeta "templates" y solo se registra la advertencia.
+templateService.syncCatalog().catch(error => {
+  logger.warn('No se pudieron sincronizar las plantillas en la base de datos:', error.message);
 });
 
 // Edición colaborativa en tiempo real (WebSocket sobre el mismo servidor HTTP)
