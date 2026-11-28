@@ -34,6 +34,12 @@ function createProjectController(projectService) {
       res.status(201).json({ message: 'Proyecto creado exitosamente', project, storageSynced });
     },
 
+    /** POST /api/projects/import-zip  { fileName, dataBase64, name? } */
+    async importZip(req, res) {
+      const project = await projectService.importProjectFromZip(req.user.id, req.body);
+      res.status(201).json({ message: 'Proyecto importado desde el .zip', project });
+    },
+
     /** GET /api/projects/:id */
     async getProjectById(req, res) {
       const project = await projectService.getProject(req.user.id, req.params.id);

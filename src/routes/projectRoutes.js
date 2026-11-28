@@ -80,6 +80,43 @@ router.post('/', projectController.createProject);
 
 /**
  * @swagger
+ * /api/projects/import-zip:
+ *   post:
+ *     summary: Crear un proyecto subiendo un .zip (como "Subir proyecto en Zip" de Overleaf)
+ *     description: |
+ *       Respeta las carpetas del .zip y usa como principal el .tex de la raíz que declara \documentclass
+ *       (prefiere main.tex). Límites: .zip de 7 MB, 500 archivos, 10 MB por archivo y 50 MB descomprimido.
+ *       Se rechazan rutas que intenten salir del proyecto, enlaces simbólicos y ZIP cifrados.
+ *     tags: [Proyectos]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [dataBase64]
+ *             properties:
+ *               fileName:
+ *                 type: string
+ *                 example: Mi tesis.zip
+ *               name:
+ *                 type: string
+ *                 description: Nombre del proyecto (por defecto, el del archivo sin .zip)
+ *               dataBase64:
+ *                 type: string
+ *                 description: Contenido del .zip en base64
+ *     responses:
+ *       201:
+ *         description: Proyecto creado con todos los archivos del .zip
+ *       400:
+ *         description: ZIP no válido, sin .tex principal o que supera algún límite
+ */
+router.post('/import-zip', projectController.importZip);
+
+/**
+ * @swagger
  * /api/projects/{id}:
  *   get:
  *     summary: Obtener los detalles de un proyecto
